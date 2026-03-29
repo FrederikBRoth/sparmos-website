@@ -1,0 +1,50 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>WGPU WASM Test</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+
+      canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+        z-index: 2;
+      }
+
+      .canvas-container {
+        width: 100%;
+        height: 100vh;
+        position: fixed;
+        top: 0;
+        left: 0;
+        background-color: black;
+      }
+
+      .scroll-container {
+        width: 100%;
+        height: 5vh;
+        top: 0;
+        left: 0;
+        background-color: black;
+        z-index: 3;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="canvas-container">
+      <canvas id="canvas"></canvas>
+      <script type="module">
+        import init from "./pkg/sparmos_website.js";
+        init();
+      </script>
+    </div>
+    <div style="height: 5000px; z-index: -5"></div>
+  </body>
+</html>

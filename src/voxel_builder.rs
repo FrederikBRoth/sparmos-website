@@ -7,6 +7,7 @@ use dot_vox::load_bytes;
 use rand::{rng, seq::SliceRandom};
 use sparmos_engine::cgmath::{InnerSpace, Rotation3, Zero};
 use sparmos_engine::entity::core::instance::Instance;
+use sparmos_engine::entity::entities::cube::new;
 use sparmos_engine::helpers::animation::{
     AnimationHandler, AnimationStep, AnimationTransition, AnimationType, StepState,
 };
@@ -14,6 +15,7 @@ use sparmos_engine::{cgmath, log};
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 
+use rand::Rng;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum VoxelObjects {
     Home,
@@ -128,39 +130,6 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
         self.voxels_map.get_mut(&current_object)
     }
 
-    // pub fn explode_object(&mut self, animation_handler: &mut AnimationHandler, amplify: f32) {
-    //     let current_voxel = self.current_voxel.as_mut().unwrap().clone();
-    //     self.transition_to_object_base(
-    //         current_voxel,
-    //         animation_handler,
-    //         amplify,
-    //         false,
-    //         false,
-    //         false,
-    //     );
-    // }
-    // pub fn transition_to_custom_object(
-    //     &mut self,
-    //     object: T,
-    //     index: usize,
-    //     animation_handler: &mut AnimationHandler,
-    //     use_object_color: bool,
-    //     is_instant: bool,
-    // ) {
-    //     if let Some(obj_list) = self.custom_voxel_map.get(&object) {
-    //         let obj = obj_list.get(index).cloned();
-    //         if let Some(obj) = obj {
-    //             self.transition_to_custom_object_base(
-    //                 &obj,
-    //                 animation_handler,
-    //                 1.0,
-    //                 true,
-    //                 use_object_color,
-    //                 is_instant,
-    //             );
-    //         }
-    //     }
-    // }
     pub fn transition_to_object(
         &mut self,
         object: T,
@@ -175,250 +144,6 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
             use_object_color,
         );
     }
-
-    // fn transition_to_custom_object_base(
-    //     &mut self,
-    //     object: &Object,
-    //     animation_handler: &mut AnimationHandler,
-    //     amplify: f32,
-    //     is_onetime: bool,
-    //     use_object_color: bool,
-    //     is_instant: bool,
-    // ) {
-    //     let mut current_cubes = self.current_cubes.clone();
-    //     let mut new_current_cubes: Vec<usize> = vec![];
-    //
-    //     if object.cubes.len() > animation_handler.movement_list.len() {
-    //         println!("Object too large to show");
-    //         return;
-    //     }
-    //     let cube_indices: Vec<usize> = (0..object.cubes.len()).collect();
-    //     let instance_indices: Vec<usize> = (0..animation_handler.movement_list.len()).collect();
-    //     if current_cubes.is_empty() {
-    //         current_cubes = instance_indices.clone();
-    //     }
-    //     let instance_indices_in_order: Vec<usize> =
-    //         (0..animation_handler.movement_list.len()).collect();
-    //
-    //     let cube_indices_len = cube_indices.len();
-    //     let current_cubes_len = current_cubes.len();
-    //     let mut rng = rng();
-    //
-    //     if cube_indices_len > current_cubes_len {
-    //         let current_cubes_set: HashSet<_> = current_cubes.iter().copied().collect();
-    //
-    //         let mut cube_indicees_excluded: Vec<usize> = instance_indices
-    //             .iter()
-    //             .filter(|i| !current_cubes_set.contains(i))
-    //             .copied()
-    //             .collect();
-    //
-    //         cube_indicees_excluded.shuffle(&mut rng);
-    //         for n in 0..(cube_indices_len - current_cubes_len) {
-    //             let elem = cube_indicees_excluded.get(n).unwrap();
-    //             current_cubes.push(*elem);
-    //         }
-    //         // println!("Bigger!")
-    //     } else {
-    //         // println!("Smaller or the same")
-    //     }
-    //
-    //     // current_cubes.shuffle(&mut rng);
-    //     current_cubes.shuffle(&mut rng);
-    //     let cubes_indices: Vec<usize> = (0..object.cubes.len()).collect();
-    //     for &i in &cubes_indices {
-    //         let cube = object.cubes.get(i).unwrap();
-    //         let instance_index = current_cubes.pop().unwrap();
-    //         let animation = animation_handler.movement_list.get(instance_index).unwrap();
-    //         new_current_cubes.push(instance_index);
-    //         let movement_vector = cube - animation.grid_pos;
-    //         let animation = AnimationType::Step(AnimationStep::new(
-    //             movement_vector * amplify,
-    //             0.75,
-    //             false,
-    //             false,
-    //             is_onetime,
-    //             is_instant,
-    //             AnimationTransition::EaseInEaseOut(EaseInEaseOut),
-    //             15,
-    //         ));
-    //         if use_object_color {
-    //             let &color = object.color.get(i).unwrap();
-    //
-    //             animation_handler.set_manual_animation_color(instance_index, color);
-    //         } else {
-    //             animation_handler.set_animated_color(instance_index);
-    //         }
-    //         animation_handler.set_animation(instance_index, animation);
-    //         // animation_handler.reset_animation_time(index);
-    //         animation_handler.set_animation_state(instance_index, true);
-    //     }
-    //     let instance_indices_remaining: HashSet<usize> =
-    //         new_current_cubes.iter().cloned().collect();
-    //
-    //     // Filter instance_indices to exclude anything in cubes_set
-    //     let remaining_indices: Vec<usize> = instance_indices_in_order
-    //         .clone()
-    //         .into_iter()
-    //         .filter(|i| !instance_indices_remaining.contains(i))
-    //         .collect();
-    //
-    //     let mut circle = fibonacci_sphere(remaining_indices.clone().len(), 750.0);
-    //
-    //     for i in remaining_indices {
-    //         let animation = animation_handler.movement_list.get(i).unwrap();
-    //
-    //         let point = circle.pop().unwrap();
-    //         let mut movement_vector = Vector3::new(0.0, 0.0, 0.0);
-    //         if animation.grid_pos.distance(Vector3 {
-    //             x: 0.0,
-    //             y: 0.0,
-    //             z: 0.0,
-    //         }) <= 500.0
-    //         {
-    //             movement_vector = Vector3::new(point.x, point.y, point.z);
-    //             movement_vector = movement_vector - animation.grid_pos;
-    //         }
-    //         let animation = AnimationType::Step(AnimationStep::new(
-    //             movement_vector,
-    //             0.5,
-    //             false,
-    //             false,
-    //             is_onetime,
-    //             is_instant,
-    //             AnimationTransition::EaseInEaseOut(EaseInEaseOut),
-    //             15,
-    //         ));
-    //
-    //         animation_handler.set_animated_color(i);
-    //         animation_handler.set_animation(i, animation);
-    //         // animation_handler.reset_animation_time(index);
-    //         animation_handler.set_animation_state(i, true);
-    //     }
-    //     self.current_cubes = new_current_cubes;
-    // }
-
-    // pub fn transition_to_ba_object(
-    //     &mut self,
-    //     object: &Vec<Vector3<f32>>,
-    //     animation_handler: &mut AnimationHandler,
-    //     amplify: f32,
-    //     is_onetime: bool,
-    //     use_object_color: bool,
-    //     is_instant: bool,
-    // ) {
-    //     let mut current_cubes = self.current_cubes.clone();
-    //     let mut new_current_cubes: Vec<usize> = vec![];
-    //
-    //     if object.len() > animation_handler.movement_list.len() {
-    //         println!("Object too large to show");
-    //         return;
-    //     }
-    //     let cube_indices: Vec<usize> = (0..object.len()).collect();
-    //     let instance_indices: Vec<usize> = (0..animation_handler.movement_list.len()).collect();
-    //     if current_cubes.is_empty() {
-    //         current_cubes = instance_indices.clone();
-    //     }
-    //     let instance_indices_in_order: Vec<usize> =
-    //         (0..animation_handler.movement_list.len()).collect();
-    //
-    //     let cube_indices_len = cube_indices.len();
-    //     let current_cubes_len = current_cubes.len();
-    //     let mut rng = rng();
-    //
-    //     if cube_indices_len > current_cubes_len {
-    //         let current_cubes_set: HashSet<_> = current_cubes.iter().copied().collect();
-    //
-    //         let mut cube_indicees_excluded: Vec<usize> = instance_indices
-    //             .iter()
-    //             .filter(|i| !current_cubes_set.contains(i))
-    //             .copied()
-    //             .collect();
-    //
-    //         cube_indicees_excluded.shuffle(&mut rng);
-    //         for n in 0..(cube_indices_len - current_cubes_len) {
-    //             let elem = cube_indicees_excluded.get(n).unwrap();
-    //             current_cubes.push(*elem);
-    //         }
-    //         // println!("Bigger!")
-    //     } else {
-    //         // println!("Smaller or the same")
-    //     }
-    //
-    //     // current_cubes.shuffle(&mut rng);
-    //     current_cubes.shuffle(&mut rng);
-    //     let cubes_indices: Vec<usize> = (0..object.len()).collect();
-    //     for &i in &cubes_indices {
-    //         let cube = object.get(i).unwrap();
-    //         let instance_index = current_cubes.pop().unwrap();
-    //         let animation = animation_handler.movement_list.get(instance_index).unwrap();
-    //         new_current_cubes.push(instance_index);
-    //         let movement_vector = cube - animation.grid_pos;
-    //         let animation = AnimationType::Step(AnimationStep::new(
-    //             movement_vector * amplify,
-    //             0.75,
-    //             false,
-    //             false,
-    //             is_onetime,
-    //             is_instant,
-    //             AnimationTransition::EaseInEaseOut(EaseInEaseOut),
-    //             15,
-    //         ));
-    //         if use_object_color {
-    //             let color = Vector3::new(0.852, 0.067, 0.308);
-    //
-    //             animation_handler.set_manual_animation_color(instance_index, color);
-    //         } else {
-    //             animation_handler.set_animated_color(instance_index);
-    //         }
-    //         animation_handler.set_animation(instance_index, animation);
-    //         // animation_handler.reset_animation_time(index);
-    //         animation_handler.set_animation_state(instance_index, true);
-    //     }
-    //     let instance_indices_remaining: HashSet<usize> =
-    //         new_current_cubes.iter().cloned().collect();
-    //
-    //     // Filter instance_indices to exclude anything in cubes_set
-    //     let remaining_indices: Vec<usize> = instance_indices_in_order
-    //         .clone()
-    //         .into_iter()
-    //         .filter(|i| !instance_indices_remaining.contains(i))
-    //         .collect();
-    //
-    //     let mut circle = fibonacci_sphere(remaining_indices.clone().len(), 750.0);
-    //
-    //     for i in remaining_indices {
-    //         let animation = animation_handler.movement_list.get(i).unwrap();
-    //
-    //         let point = circle.pop().unwrap();
-    //         let mut movement_vector = Vector3::new(0.0, 0.0, 0.0);
-    //         if animation.grid_pos.distance(Vector3 {
-    //             x: 0.0,
-    //             y: 0.0,
-    //             z: 0.0,
-    //         }) <= 500.0
-    //         {
-    //             movement_vector = Vector3::new(point.x, point.y, point.z);
-    //             movement_vector = movement_vector - animation.grid_pos;
-    //         }
-    //         let animation = AnimationType::Step(AnimationStep::new(
-    //             movement_vector,
-    //             0.5,
-    //             false,
-    //             false,
-    //             is_onetime,
-    //             is_instant,
-    //             AnimationTransition::EaseInEaseOut(EaseInEaseOut),
-    //             15,
-    //         ));
-    //
-    //         animation_handler.set_animated_color(i);
-    //         animation_handler.set_animation(i, animation);
-    //         // animation_handler.reset_animation_time(index);
-    //         animation_handler.set_animation_state(i, true);
-    //     }
-    //     self.current_cubes = new_current_cubes;
-    // }
 
     fn transition_to_object_base(
         &mut self,
@@ -441,52 +166,102 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
             return;
         }
 
-        // 🔥 reuse buffers
-        self.temp_indices.clear();
-        self.temp_indices.extend(0..instance_count);
+        let mut rng = rand::rng();
 
         self.temp_flags.clear();
         self.temp_flags.resize(instance_count, false);
 
-        // 🔀 partial shuffle (Fisher-Yates, only what we need)
-        let mut rng = rng();
+        for &idx in &self.current_cubes {
+            if idx < instance_count {
+                self.temp_flags[idx] = true;
+            }
+        }
+
+        let reuse_count = cube_count.min(self.current_cubes.len());
+
+        for i in 0..reuse_count {
+            let j = rng.random_range(i..self.current_cubes.len());
+            self.current_cubes.swap(i, j);
+        }
+
+        let mut new_len = reuse_count;
+
+        if cube_count > reuse_count {
+            self.temp_indices.clear();
+
+            for i in 0..instance_count {
+                if !self.temp_flags[i] {
+                    self.temp_indices.push(i);
+                }
+            }
+
+            let needed = cube_count - reuse_count;
+
+            for k in 0..needed {
+                let idx = self.temp_indices[k];
+
+                if new_len < self.current_cubes.len() {
+                    self.current_cubes[new_len] = idx;
+                } else {
+                    self.current_cubes.push(idx);
+                }
+
+                self.temp_flags[idx] = true;
+                new_len += 1;
+            }
+        }
+
+        if cube_count < self.current_cubes.len() {
+            for &idx in &self.current_cubes[cube_count..] {
+                if idx < instance_count {
+                    self.temp_flags[idx] = false;
+                }
+            }
+        }
+
+        self.current_cubes.truncate(cube_count);
+
+        self.temp_indices.clear();
+        self.temp_indices.extend(0..cube_count);
+
         for i in 0..cube_count {
-            let j = rand::Rng::random_range(&mut rng, i..instance_count);
+            let j = rng.random_range(i..cube_count);
             self.temp_indices.swap(i, j);
         }
 
-        self.current_cubes.clear();
-        self.current_cubes.reserve(cube_count);
+        for (i, &instance_index) in self.current_cubes.iter().enumerate() {
+            let cube_index = self.temp_indices[i];
+            let cube = object.cubes[cube_index] * amplify;
 
-        // ✅ assign cubes → instances
-        for i in 0..cube_count {
-            let instance_index = self.temp_indices[i];
-            self.temp_flags[instance_index] = true;
-            self.current_cubes.push(instance_index);
-
-            let cube = object.cubes[i];
             let anim = &mut animation_handler.movement_list[instance_index];
 
             let step = AnimationStep {
                 from: anim.base_position,
-                to: cube * amplify,
+                to: cube,
                 t: 0.0,
                 speed: 0.75,
                 animation_transition: AnimationTransition::EaseInEaseOut,
                 state: StepState::Forward,
             };
 
-            anim.steps.clear(); // optional: overwrite instead of stacking
+            anim.steps.clear();
             anim.steps.push(step);
 
             if use_object_color {
-                anim.color = object.color[i];
+                anim.color = object.color[cube_index];
             }
         }
 
-        // 🌌 remaining instances → sphere
+        let remaining = instance_count - self.current_cubes.len();
+
+        let mut sphere = fibonacci_sphere(remaining, 750.0);
+
+        for i in 0..sphere.len() {
+            let j = rng.random_range(i..sphere.len());
+            sphere.swap(i, j);
+        }
+
         let mut sphere_index = 0;
-        let sphere = fibonacci_sphere(instance_count - cube_count, 750.0);
 
         for i in 0..instance_count {
             if self.temp_flags[i] {
@@ -494,10 +269,17 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
             }
 
             let anim = &mut animation_handler.movement_list[i];
-
             let point = sphere[sphere_index];
             sphere_index += 1;
 
+            if anim.base_position.distance(Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            }) >= 500.0
+            {
+                continue;
+            }
             let step = AnimationStep {
                 from: anim.base_position,
                 to: point,
@@ -532,7 +314,7 @@ pub fn instances_list_cube(chunk: Vector3<i32>, chunk_size: Vector3<i32>) -> Vec
             } else {
                 cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(0.0))
             };
-            let default_color = cgmath::Vector3::new(1.0, 0.0, 0.0);
+            let default_color = cgmath::Vector3::new(0.0, 0.0, 0.0);
             let default_size = cgmath::Vector3::new(1.0, 1.0, 1.0);
             let default_bounding = default_size + position;
 

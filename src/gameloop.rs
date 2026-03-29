@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use sparmos_engine::{
     application::state::{Core, DeviceBackend, Game, State, map_value},
@@ -12,7 +12,7 @@ use sparmos_engine::{
             material::MaterialBuilder,
             render::Renderable,
         },
-        entities::cube,
+        entities::cube::{self, new},
         systems::{
             camera::{Camera, CameraSystem},
             light::{Light, LightSystem},
@@ -32,6 +32,7 @@ use sparmos_engine::{
 
 use crate::{
     markers::{self, Boxes},
+    transition::{self, TransitionHandler},
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
 };
 
@@ -40,7 +41,8 @@ pub struct Website {
     pub counter: usize,
     pub cursor_pos: PhysicalPosition<f32>,
     pub cursor_delta: (f64, f64),
-    pub vh: VoxelHandler<VoxelObjects>,
+    pub voxel_handler: VoxelHandler<VoxelObjects>,
+    pub transition_handler: TransitionHandler<VoxelObjects>,
 }
 
 impl Default for Website {
@@ -50,7 +52,8 @@ impl Default for Website {
             counter: 0,
             cursor_pos: PhysicalPosition { x: 0.0, y: 0.0 },
             cursor_delta: (0.0, 0.0),
-            vh: VoxelHandler::<VoxelObjects>::new(),
+            voxel_handler: VoxelHandler::<VoxelObjects>::new(),
+            transition_handler: TransitionHandler::<VoxelObjects>::new(BTreeMap::new()),
         }
     }
 }
@@ -64,33 +67,37 @@ impl Game for Website {
         let camera_system = core.engine.resources.get_system_mut::<CameraSystem>();
         camera_system.update_camera(dt, &core.render_context, camera);
 
-        let mut query = core.engine.world.query::<(&Renderable, &markers::Light)>();
-        for (renderable, _) in query.iter() {
-            core.render_context
-                .gpu_objects
-                .instance_controllers
-                .get_mut(renderable.instance_controller_handle)
-                .unwrap()
-                .update(&core.render_context.queue);
-        }
-        let start = web_time::Instant::now();
-        let mut query = core
-            .engine
-            .world
-            .query::<(&Renderable, &markers::Boxes, &mut AnimationHandler)>();
-        for (renderable, _, ah) in query.iter() {
-            // ah.animate(dt.as_secs_f32());
-            let ic = core
-                .render_context
-                .gpu_objects
-                .instance_controllers
-                .get_mut(renderable.instance_controller_handle)
-                .unwrap();
+        if let Some(scroll_y) = core.args.get("scrolly")
+            && let Some(scroll_y) = scroll_y.downcast_ref::<f64>()
+            && let Some(transition) = self
+                .transition_handler
+                .get_transition_once(*scroll_y as i64)
+        {
+            log::warn!("Test123");
+            match transition.clone() {
+                VoxelObjects::Home => {}
+                _ => {
+                    let mut query = core
+                        .engine
+                        .world
+                        .query::<(&Renderable, &mut AnimationHandler)>();
+                    let (render, ah) = query.iter().next().expect("No AH");
 
-            ah.update(dt.as_secs_f32(), ic.instances_mut().as_mut());
-            ic.update(&core.render_context.queue);
+                    let ic = core
+                        .render_context
+                        .gpu_objects
+                        .instance_controllers
+                        .get_mut(render.instance_controller_handle)
+                        .unwrap();
+
+                    ah.reset_instance_position_to_current_position(ic.instances_mut().as_mut());
+                    self.voxel_handler
+                        .transition_to_object(transition, ah, true, 1.0);
+                }
+
+                _ => {}
+            }
         }
-        let elapsed = start.elapsed();
     }
 
     fn process_event(
@@ -121,14 +128,58 @@ impl Game for Website {
                     KeyCode::Space => {}
                     KeyCode::PageUp => match state {
                         winit::event::ElementState::Pressed => {
-                            let mut query = core.engine.world.query::<&mut AnimationHandler>();
-                            let ah = query.iter().next().expect("No AH");
-                            self.vh
-                                .transition_to_object(VoxelObjects::HandballBird, ah, true, 1.0);
+                            let mut query = core
+                                .engine
+                                .world
+                                .query::<(&Renderable, &mut AnimationHandler)>();
+                            let (render, ah) = query.iter().next().expect("No AH");
+
+                            let ic = core
+                                .render_context
+                                .gpu_objects
+                                .instance_controllers
+                                .get_mut(render.instance_controller_handle)
+                                .unwrap();
+                            ah.reset_instance_position_to_current_position(
+                                ic.instances_mut().as_mut(),
+                            );
+                            self.voxel_handler.transition_to_object(
+                                VoxelObjects::HandballBird,
+                                ah,
+                                true,
+                                1.0,
+                            );
                         }
                         _ => {}
                     },
 
+                    KeyCode::PageDown => match state {
+                        winit::event::ElementState::Pressed => {
+                            let mut query = core
+                                .engine
+                                .world
+                                .query::<(&Renderable, &mut AnimationHandler)>();
+                            let (render, ah) = query.iter().next().expect("No AH");
+
+                            let ic = core
+                                .render_context
+                                .gpu_objects
+                                .instance_controllers
+                                .get_mut(render.instance_controller_handle)
+                                .unwrap();
+
+                            ah.reset_instance_position_to_current_position(
+                                ic.instances_mut().as_mut(),
+                            );
+                            self.voxel_handler.transition_to_object(
+                                VoxelObjects::FemogfirsSlangen,
+                                ah,
+                                true,
+                                1.0,
+                            );
+                        }
+                        _ => {}
+                    },
                     _ => (),
                 }
             }
@@ -294,17 +345,72 @@ impl Game for Website {
         engine.add_entity((box_entity, markers::Boxes, animation_handler));
         // }
 
+        let castle = include_bytes!("../castle.vox");
+        let chr_knight = include_bytes!("../chr_knight.vox");
+        let rust_logo = include_bytes!("../rust.vox");
+        let c_plus_plus = include_bytes!("../cplusplus.vox");
+        let c_sharp = include_bytes!("../csharp.vox");
+        let docker = include_bytes!("../docker.vox");
         let hb_fugl = include_bytes!("../hbfugl.vox");
+        let femo_snake = include_bytes!("../femoslangen.vox");
+        self.voxel_handler.add_voxel(castle, VoxelObjects::Castle);
+        self.voxel_handler
+            .add_voxel(chr_knight, VoxelObjects::Viking);
+        self.voxel_handler.add_voxel(rust_logo, VoxelObjects::Rust);
+        self.voxel_handler
+            .add_voxel(c_plus_plus, VoxelObjects::CPlusPLus);
+        self.voxel_handler.add_voxel(c_sharp, VoxelObjects::CSharp);
+        self.voxel_handler
+            .add_voxel(docker, VoxelObjects::Containerization);
+        self.voxel_handler
+            .add_voxel(hb_fugl, VoxelObjects::HandballBird);
+        self.voxel_handler
+            .add_voxel(femo_snake, VoxelObjects::FemogfirsSlangen);
+        let transition_scroll_positions: Vec<i64> =
+            vec![300, 1300, 2100, 2950, 3850, 4750, 5599, 6485, 7200];
 
-        self.vh.add_voxel(hb_fugl, VoxelObjects::HandballBird);
+        let mut transition_map = BTreeMap::new();
+        transition_map.insert(
+            *transition_scroll_positions.get(0).unwrap(),
+            VoxelObjects::Home,
+        );
+        transition_map.insert(
+            *transition_scroll_positions.get(1).unwrap(),
+            VoxelObjects::CSharp,
+        );
+        transition_map.insert(
+            *transition_scroll_positions.get(2).unwrap(),
+            VoxelObjects::Rust,
+        );
+        transition_map.insert(
+            *transition_scroll_positions.get(3).unwrap(),
+            VoxelObjects::CPlusPLus,
+        );
+        transition_map.insert(
+            *transition_scroll_positions.get(4).unwrap(),
+            VoxelObjects::Containerization,
+        );
+        transition_map.insert(
+            *transition_scroll_positions.get(5).unwrap(),
+            VoxelObjects::CPlusPLus,
+        );
+        transition_map.insert(
+            *transition_scroll_positions.get(6).unwrap(),
+            VoxelObjects::CSharp,
+        );
+        transition_map.insert(
+            *transition_scroll_positions.get(7).unwrap(),
+            VoxelObjects::Rust,
+        );
+        transition_map.insert(
+            *transition_scroll_positions.get(8).unwrap(),
+            VoxelObjects::CPlusPLus,
+        );
 
-        //Should group renderList by material, so that we dont do many pipeline shifts
+        self.transition_handler.transition_map = transition_map;
     }
 
     fn resize(&mut self, core: &mut Core) {
-        // let mut camera_system = self.world.query::<&mut CameraSystem>o();
-        // let camera_system = camera_system.iter().next().unwrap();
-
         let mut query = core.engine.world.query::<&mut Camera>();
         let camera = query.iter().next().expect("No camera found");
         let camera_system = core.engine.resources.get_system_mut::<CameraSystem>();

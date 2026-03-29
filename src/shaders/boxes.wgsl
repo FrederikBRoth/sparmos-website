@@ -69,7 +69,7 @@ fn vs_main(
     // normal matrix = rotation only
     let normal = normalize(rot * model.normal);
     var out: VertexOutput;
-    out.color = vec3<f32>(1.0, 1.0, 1.0);
+    out.color = instance.color;
     out.world_normal = normal;
     out.world_position = world_pos.xyz;
     out.clip_position = camera.view_proj * world_pos;
@@ -83,7 +83,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let shininess = 32.0;
 
 
-    var result: vec3<f32> = vec3<f32>(0.0);
+    var result: vec3<f32> = in.color;
 
     let N = normalize(in.world_normal);
     let V = normalize(camera.view_pos.xyz - in.world_position);

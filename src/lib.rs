@@ -1,6 +1,7 @@
 pub mod app;
 pub mod gameloop;
 pub mod markers;
+pub mod transition;
 pub mod voxel_builder;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;

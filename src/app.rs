@@ -18,7 +18,7 @@ impl AppLifecycle<WasmEvent> for EventContainer {
     fn on_user_event(&mut self, state: &mut State, event: WasmEvent) {
         match event {
             WasmEvent::ScrollPosition { x, y } => {
-                state.core.args.insert("scrolly".to_string(), Box::new(y));
+                state.engine.args.insert("scrolly".to_string(), Box::new(y));
                 log::warn!("scroll x: {}, y: {}", x, y);
             }
             WasmEvent::KeyboardButton { keypress } => {

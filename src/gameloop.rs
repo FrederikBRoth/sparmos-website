@@ -1,26 +1,23 @@
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::collections::BTreeMap;
 
-use sparmos_engine::{
-    application::state::{Core, DeviceBackend, Game, State, map_value},
-    cgmath::{self, *},
-    egui::{self, Color32, Rect, Response, Sense, Ui, Vec2},
-    entity::{
-        core::{
-            buffer::{Buffer, BufferType},
-            geometry::Primitive,
-            instance::{GpuInstance, Instance, InstanceController, InstanceRaw},
-            material::MaterialBuilder,
-            render::Renderable,
-        },
-        entities::cube::{self, new},
-        systems::{
-            camera::{Camera, CameraSystem},
-            light::{Light, LightSystem},
-        },
-        texture::Texture,
+use sparmos_engine::entity::{
+    core::{
+        engine::Engine,
+        instance::{GpuInstance, Instance, InstanceController},
+        material::MaterialBuilder,
+        render::Renderable,
     },
-    helpers::{animation::AnimationHandler, line_trace::line_trace_square},
-    log, web_time,
+    entities::cube::{self},
+    systems::{
+        camera::{Camera, CameraSystem},
+        light::{Light, LightSystem},
+    },
+};
+use sparmos_engine::{
+    application::state::{Game, State, map_value},
+    cgmath::{self, *},
+    helpers::animation::AnimationHandler,
+    log,
     wgpu::{self},
     winit::{
         self,
@@ -31,8 +28,8 @@ use sparmos_engine::{
 };
 
 use crate::{
-    markers::{self, Boxes},
-    transition::{self, TransitionHandler},
+    markers::{self},
+    transition::TransitionHandler,
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
 };
 
@@ -59,15 +56,15 @@ impl Default for Website {
 }
 
 impl Game for Website {
-    fn update(&mut self, dt: std::time::Duration, core: &mut Core) {
+    fn update(&mut self, dt: std::time::Duration, engine: &mut Engine) {
         // let mut camera_system = self.world.query::<&mut CameraSystem>();
         // let camera_system = camera_system.iter().next().unwrap();
-        let mut query = core.engine.world.query::<&mut Camera>();
+        let mut query = engine.world.query::<&mut Camera>();
         let camera = query.iter().next().expect("No camera found");
-        let camera_system = core.engine.resources.get_system_mut::<CameraSystem>();
-        camera_system.update_camera(dt, &core.render_context, camera);
+        let camera_system = engine.resources.get_system_mut::<CameraSystem>();
+        camera_system.update_camera(dt, &engine.render_context, camera);
 
-        if let Some(scroll_y) = core.args.get("scrolly")
+        if let Some(scroll_y) = engine.args.get("scrolly")
             && let Some(scroll_y) = scroll_y.downcast_ref::<f64>()
             && let Some(transition) = self
                 .transition_handler
@@ -77,13 +74,10 @@ impl Game for Website {
             match transition.clone() {
                 VoxelObjects::Home => {}
                 _ => {
-                    let mut query = core
-                        .engine
-                        .world
-                        .query::<(&Renderable, &mut AnimationHandler)>();
+                    let mut query = engine.world.query::<(&Renderable, &mut AnimationHandler)>();
                     let (render, ah) = query.iter().next().expect("No AH");
 
-                    let ic = core
+                    let ic = engine
                         .render_context
                         .gpu_objects
                         .instance_controllers
@@ -94,8 +88,6 @@ impl Game for Website {
                     self.voxel_handler
                         .transition_to_object(transition, ah, true, 1.0);
                 }
-
-                _ => {}
             }
         }
     }
@@ -103,15 +95,15 @@ impl Game for Website {
     fn process_event(
         &mut self,
         event: &winit::event::WindowEvent,
-        screen: &winit::dpi::PhysicalSize<u32>,
-        core: &mut Core,
+        _screen: &winit::dpi::PhysicalSize<u32>,
+        engine: &mut Engine,
     ) {
         // let mut camera_system = self.world.query::<&mut CameraSystem>();
         // let camera_system = camera_system.iter().next().unwrap();
         // let (entity, camera) = state
-        let mut query = core.engine.world.query::<&mut Camera>();
+        let mut query = engine.world.query::<&mut Camera>();
         let camera = query.iter().next().expect("No camera found");
-        let camera_system = core.engine.resources.get_system_mut::<CameraSystem>();
+        let camera_system = engine.resources.get_system_mut::<CameraSystem>();
         match event {
             WindowEvent::KeyboardInput {
                 event:
@@ -128,13 +120,11 @@ impl Game for Website {
                     KeyCode::Space => {}
                     KeyCode::PageUp => match state {
                         winit::event::ElementState::Pressed => {
-                            let mut query = core
-                                .engine
-                                .world
-                                .query::<(&Renderable, &mut AnimationHandler)>();
+                            let mut query =
+                                engine.world.query::<(&Renderable, &mut AnimationHandler)>();
                             let (render, ah) = query.iter().next().expect("No AH");
 
-                            let ic = core
+                            let ic = engine
                                 .render_context
                                 .gpu_objects
                                 .instance_controllers
@@ -155,13 +145,11 @@ impl Game for Website {
 
                     KeyCode::PageDown => match state {
                         winit::event::ElementState::Pressed => {
-                            let mut query = core
-                                .engine
-                                .world
-                                .query::<(&Renderable, &mut AnimationHandler)>();
+                            let mut query =
+                                engine.world.query::<(&Renderable, &mut AnimationHandler)>();
                             let (render, ah) = query.iter().next().expect("No AH");
 
-                            let ic = core
+                            let ic = engine
                                 .render_context
                                 .gpu_objects
                                 .instance_controllers
@@ -227,14 +215,19 @@ impl Game for Website {
     }
 
     fn setup(&mut self, state: &mut State) {
+        let engine = &mut state.engine;
+
+        //Initiates Camera system
         let camera = Camera::new(PhysicalSize::new(
             state.size.width as f32,
             state.size.height as f32,
         ));
-        let camera_system =
-            CameraSystem::new(75.0, 50.0, &state.core.render_context.device, &camera);
+        let camera_system = CameraSystem::new(75.0, 50.0, &engine.render_context.device, &camera);
         //registers system and creates bind_group
 
+        engine.add_entity((camera,));
+        engine.add_system(camera_system);
+        //Initiates lighting
         let light = Light {
             position: cgmath::vec3(200.0, 200.0, 1.0),
             color: cgmath::vec3(1.0, 0.0, 0.0),
@@ -246,102 +239,57 @@ impl Game for Website {
         };
         let light_system = LightSystem::init(
             &[light.clone(), light2.clone()],
-            &state.core.render_context.device,
+            &engine.render_context.device,
         );
-        let engine = &mut state.core.engine;
-        engine.add_entity((camera,));
-        engine.add_system(camera_system, &state.core.render_context.device);
-        engine.add_system(light_system, &state.core.render_context.device);
-        let primitive_shader =
-            state
-                .core
-                .render_context
-                .device
-                .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("PrimitiveShader"),
-                    source: wgpu::ShaderSource::Wgsl(include_str!("shaders/lights.wgsl").into()),
-                });
+        engine.add_system(light_system);
 
-        let box_shader =
-            state
-                .core
-                .render_context
-                .device
-                .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("PrimitiveShader"),
-                    source: wgpu::ShaderSource::Wgsl(include_str!("shaders/boxes.wgsl").into()),
-                });
-        state
-            .core
+        //Initiate Shaders
+        engine
             .render_context
-            .shaders
-            .insert("lights".to_string(), primitive_shader);
-
-        state
-            .core
+            .add_shader("lights", include_str!("shaders/lights.wgsl"));
+        engine
             .render_context
-            .shaders
-            .insert("boxes".to_string(), box_shader);
+            .add_shader("boxes", include_str!("shaders/boxes.wgsl"));
 
-        let cube_mesh = cube::new().make_mb(&state.core.render_context.device);
+        //Initiate meshes
+        let cube_mesh = cube::new().make_mb(&mut engine.render_context);
+
         let light_ic = InstanceController::<GpuInstance>::new(
             vec![
                 Instance::new([200.0, 200.0, 1.0].into(), 10.0),
                 Instance::new([-200.0, -200.0, 1.0].into(), 10.0),
             ],
-            &state.core.render_context.device,
+            &mut engine.render_context,
         );
         let light_mat = MaterialBuilder::new()
             .add_layout("camera", engine.resources.get_system::<CameraSystem>())
             .add_layout("light", engine.resources.get_system::<LightSystem>())
             .add_shader("lights")
-            .build(
-                &cube_mesh.buffer_layout,
-                &state.core.render_context,
-                &light_ic.buffer_layout,
-            );
+            .build(&cube_mesh, &light_ic, &mut engine.render_context);
 
-        let instances = instances_list_cube(vec3(0, 0, 0), vec3(50, 50, 50));
-        let box_ic1 =
-            InstanceController::<GpuInstance>::new(instances, &state.core.render_context.device);
+        let light_entity = Renderable {
+            material_handle: light_mat,
+            instance_controller_handle: light_ic,
+            mesh_handle: cube_mesh,
+        };
+
+        engine.add_entity((light_entity, markers::Light));
+        let instances = instances_list_cube(vec3(0, 0, 0), vec3(40, 50, 40));
+
+        let animation_handler = AnimationHandler::new(&instances, vec![]);
+        let box_ic = InstanceController::<GpuInstance>::new(instances, &mut engine.render_context);
 
         let box_mat = MaterialBuilder::new()
             .add_layout("camera", engine.resources.get_system::<CameraSystem>())
             .add_layout("light", engine.resources.get_system::<LightSystem>())
             .add_shader("boxes")
-            .build(
-                &cube_mesh.buffer_layout,
-                &state.core.render_context,
-                &box_ic1.buffer_layout,
-            );
-
-        let gpu_objects = &mut state.core.render_context.gpu_objects;
-
-        let light_ic = gpu_objects.instance_controllers.insert(Box::new(light_ic));
-        let light_mesh = gpu_objects.meshes.insert(cube_mesh);
-        let light_mat = gpu_objects.materials.insert(light_mat);
-
-        let boxes_mat = gpu_objects.materials.insert(box_mat);
-        let light_entity = Renderable {
-            material_handle: light_mat,
-            instance_controller_handle: light_ic,
-            mesh_handle: light_mesh,
-        };
-        engine.add_entity((light_entity, markers::Light));
-
-        // for x in 0..10 {
-        let instances = instances_list_cube(vec3(0, 0, 0), vec3(40, 50, 40));
-
-        let mut animation_handler = AnimationHandler::new(&instances, vec![]);
-        let box_ic =
-            InstanceController::<GpuInstance>::new(instances, &state.core.render_context.device);
-
-        let boxes_ic = gpu_objects.instance_controllers.insert(Box::new(box_ic));
+            .build(&cube_mesh, &box_ic, &mut engine.render_context);
         let box_entity = Renderable {
-            material_handle: boxes_mat,
-            instance_controller_handle: boxes_ic,
-            mesh_handle: light_mesh,
+            material_handle: box_mat,
+            instance_controller_handle: box_ic,
+            mesh_handle: cube_mesh,
         };
+
         engine.add_entity((box_entity, markers::Boxes, animation_handler));
         // }
 
@@ -366,57 +314,28 @@ impl Game for Website {
             .add_voxel(hb_fugl, VoxelObjects::HandballBird);
         self.voxel_handler
             .add_voxel(femo_snake, VoxelObjects::FemogfirsSlangen);
-        let transition_scroll_positions: Vec<i64> =
-            vec![300, 1300, 2100, 2950, 3850, 4750, 5599, 6485, 7200];
-
-        let mut transition_map = BTreeMap::new();
-        transition_map.insert(
-            *transition_scroll_positions.get(0).unwrap(),
-            VoxelObjects::Home,
-        );
-        transition_map.insert(
-            *transition_scroll_positions.get(1).unwrap(),
-            VoxelObjects::CSharp,
-        );
-        transition_map.insert(
-            *transition_scroll_positions.get(2).unwrap(),
-            VoxelObjects::Rust,
-        );
-        transition_map.insert(
-            *transition_scroll_positions.get(3).unwrap(),
-            VoxelObjects::CPlusPLus,
-        );
-        transition_map.insert(
-            *transition_scroll_positions.get(4).unwrap(),
-            VoxelObjects::Containerization,
-        );
-        transition_map.insert(
-            *transition_scroll_positions.get(5).unwrap(),
-            VoxelObjects::CPlusPLus,
-        );
-        transition_map.insert(
-            *transition_scroll_positions.get(6).unwrap(),
-            VoxelObjects::CSharp,
-        );
-        transition_map.insert(
-            *transition_scroll_positions.get(7).unwrap(),
-            VoxelObjects::Rust,
-        );
-        transition_map.insert(
-            *transition_scroll_positions.get(8).unwrap(),
-            VoxelObjects::CPlusPLus,
-        );
+        let transition_map: BTreeMap<i64, VoxelObjects> = BTreeMap::from([
+            (300, VoxelObjects::Home),
+            (1300, VoxelObjects::CSharp),
+            (2100, VoxelObjects::Rust),
+            (2950, VoxelObjects::CPlusPLus),
+            (3850, VoxelObjects::Containerization),
+            (4750, VoxelObjects::CPlusPLus),
+            (5599, VoxelObjects::CSharp),
+            (6485, VoxelObjects::Rust),
+            (7200, VoxelObjects::CPlusPLus),
+        ]);
 
         self.transition_handler.transition_map = transition_map;
     }
 
-    fn resize(&mut self, core: &mut Core) {
-        let mut query = core.engine.world.query::<&mut Camera>();
+    fn resize(&mut self, engine: &mut Engine) {
+        let mut query = engine.world.query::<&mut Camera>();
         let camera = query.iter().next().expect("No camera found");
-        let camera_system = core.engine.resources.get_system_mut::<CameraSystem>();
+        let camera_system = engine.resources.get_system_mut::<CameraSystem>();
 
         camera.aspect =
-            core.render_context.config.width as f32 / core.render_context.config.height as f32;
+            engine.render_context.config.width as f32 / engine.render_context.config.height as f32;
         println!("{:?}", camera.aspect);
         let new_fov = map_value(camera.aspect, 0.8, 1.88, 25.0, 55.0);
         camera.fovy = new_fov;

@@ -1,22 +1,10 @@
 use std::collections::BTreeMap;
 
-use sparmos_engine::entity::{
-    core::{
-        engine::Engine,
-        instance::{GpuInstance, Instance, InstanceController},
-        material::MaterialBuilder,
-        render::Renderable,
-    },
-    entities::cube::{self},
-    systems::{
-        camera::{Camera, CameraSystem},
-        light::{Light, LightSystem},
-    },
-};
 use sparmos_engine::{
     application::state::{Game, State, map_value},
     cgmath::{self, *},
-    helpers::animation::AnimationHandler,
+    entity::systems::camera::CameraMode,
+    helpers::animation::{AnimationHandler, AnimationTransition, StepState},
     log,
     wgpu::{self},
     winit::{
@@ -26,10 +14,26 @@ use sparmos_engine::{
         keyboard::KeyCode,
     },
 };
+use sparmos_engine::{
+    entity::{
+        core::{
+            engine::Engine,
+            instance::{GpuInstance, Instance, InstanceController},
+            material::MaterialBuilder,
+            render::Renderable,
+        },
+        entities::cube::{self},
+        systems::{
+            camera::{Camera, CameraAnimator, CameraSystem},
+            light::{Light, LightSystem},
+        },
+    },
+    helpers::animation::{AnimationStep, AnimationType},
+};
 
 use crate::{
     markers::{self},
-    transition::TransitionHandler,
+    transition::{CameraPositions, TransitionHandler},
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
 };
 
@@ -40,6 +44,7 @@ pub struct Website {
     pub cursor_delta: (f64, f64),
     pub voxel_handler: VoxelHandler<VoxelObjects>,
     pub transition_handler: TransitionHandler<VoxelObjects>,
+    pub camera_transition_handler: TransitionHandler<CameraPositions>,
 }
 
 impl Default for Website {
@@ -51,6 +56,7 @@ impl Default for Website {
             cursor_delta: (0.0, 0.0),
             voxel_handler: VoxelHandler::<VoxelObjects>::new(),
             transition_handler: TransitionHandler::<VoxelObjects>::new(BTreeMap::new()),
+            camera_transition_handler: TransitionHandler::<CameraPositions>::new(BTreeMap::new()),
         }
     }
 }
@@ -59,34 +65,78 @@ impl Game for Website {
     fn update(&mut self, dt: std::time::Duration, engine: &mut Engine) {
         // let mut camera_system = self.world.query::<&mut CameraSystem>();
         // let camera_system = camera_system.iter().next().unwrap();
-        let mut query = engine.world.query::<&mut Camera>();
-        let camera = query.iter().next().expect("No camera found");
+        let mut query = engine.world.query::<(&mut Camera, &mut CameraAnimator)>();
+        let (camera, camera_animator) = query.iter().next().expect("No camera found");
         let camera_system = engine.resources.get_system_mut::<CameraSystem>();
         camera_system.update_camera(dt, &engine.render_context, camera);
 
+        camera_animator.update(dt.as_secs_f32(), camera);
+        // camera_animator
         if let Some(scroll_y) = engine.args.get("scrolly")
             && let Some(scroll_y) = scroll_y.downcast_ref::<f64>()
-            && let Some(transition) = self
+        {
+            if let Some(transition) = self
                 .transition_handler
                 .get_transition_once(*scroll_y as i64)
-        {
-            log::warn!("Test123");
-            match transition.clone() {
-                VoxelObjects::Home => {}
-                _ => {
-                    let mut query = engine.world.query::<(&Renderable, &mut AnimationHandler)>();
-                    let (render, ah) = query.iter().next().expect("No AH");
+            {
+                match transition.clone() {
+                    VoxelObjects::Home => {}
+                    _ => {
+                        let mut query =
+                            engine.world.query::<(&Renderable, &mut AnimationHandler)>();
+                        let (render, ah) = query.iter().next().expect("No AH");
 
-                    let ic = engine
-                        .render_context
-                        .gpu_objects
-                        .instance_controllers
-                        .get_mut(render.instance_controller_handle)
-                        .unwrap();
+                        let ic = engine
+                            .render_context
+                            .gpu_objects
+                            .instance_controllers
+                            .get_mut(render.instance_controller_handle)
+                            .unwrap();
 
-                    ah.reset_instance_position_to_current_position(ic.instances_mut().as_mut());
-                    self.voxel_handler
-                        .transition_to_object(transition, ah, true, 1.0);
+                        ah.reset_instance_position_to_current_position(ic.instances_mut().as_mut());
+                        self.voxel_handler
+                            .transition_to_object(transition, ah, true, 1.0);
+                    }
+                }
+            }
+
+            if let Some(transition) = self
+                .camera_transition_handler
+                .get_transition_once(*scroll_y as i64)
+            {
+                match transition.clone() {
+                    CameraPositions::Middle(position)
+                    | CameraPositions::LeftSide(position)
+                    | CameraPositions::RightSide(position)
+                    | CameraPositions::FrontAndCenter(position) => {
+                        camera_animator.reset_animation(camera);
+                        camera_animator.add_animation(
+                            Some(AnimationType::Step(AnimationStep::new(
+                                camera.eye.to_vec(),
+                                vec3(
+                                    position.0.x as f32,
+                                    position.0.y as f32,
+                                    position.0.z as f32,
+                                ),
+                                0.0,
+                                camera_animator.speed,
+                                AnimationTransition::EaseInEaseOut,
+                                StepState::Forward,
+                            ))),
+                            Some(AnimationType::Step(AnimationStep::new(
+                                camera.target.to_vec(),
+                                vec3(
+                                    position.1.x as f32,
+                                    position.1.y as f32,
+                                    position.1.z as f32,
+                                ),
+                                0.0,
+                                camera_animator.speed,
+                                AnimationTransition::EaseInEaseOut,
+                                StepState::Forward,
+                            ))),
+                        );
+                    }
                 }
             }
         }
@@ -101,8 +151,8 @@ impl Game for Website {
         // let mut camera_system = self.world.query::<&mut CameraSystem>();
         // let camera_system = camera_system.iter().next().unwrap();
         // let (entity, camera) = state
-        let mut query = engine.world.query::<&mut Camera>();
-        let camera = query.iter().next().expect("No camera found");
+        let mut query = engine.world.query::<(&mut Camera, &mut CameraAnimator)>();
+        let (camera, camera_animator) = query.iter().next().expect("No camera found");
         let camera_system = engine.resources.get_system_mut::<CameraSystem>();
         match event {
             WindowEvent::KeyboardInput {
@@ -168,6 +218,34 @@ impl Game for Website {
                         }
                         _ => {}
                     },
+                    KeyCode::Home => match state {
+                        winit::event::ElementState::Pressed => {
+                            camera_animator.disabled = !camera_animator.disabled;
+                            if camera_animator.disabled {
+                                camera.set_camera_mode(CameraMode::FreeMode);
+                            } else {
+                                camera.set_camera_mode(CameraMode::FixedMode);
+                            }
+                        }
+                        _ => {}
+                    },
+                    KeyCode::End => match state {
+                        winit::event::ElementState::Pressed => {
+                            camera_animator.add_animation(
+                                None,
+                                Some(AnimationType::Step(AnimationStep::new(
+                                    camera.target.to_vec(),
+                                    camera.target.to_vec() * 2.0,
+                                    0.0,
+                                    camera_animator.speed,
+                                    AnimationTransition::EaseInEaseOut,
+                                    StepState::Forward,
+                                ))),
+                            );
+                        }
+                        _ => {}
+                    },
+
                     _ => (),
                 }
             }
@@ -225,7 +303,13 @@ impl Game for Website {
         let camera_system = CameraSystem::new(75.0, 50.0, &engine.render_context.device, &camera);
         //registers system and creates bind_group
 
-        engine.add_entity((camera,));
+        // let eye_anim = AnimationHandler::new(&[Instance::new(vec3(0.0, 0.0, 0.0), 1.0)], vec![]);
+        //
+        // let target_anim = AnimationHandler::new(&[Instance::new(vec3(0.0, 0.0, 0.0), 1.0)], vec![]);
+
+        let camera_animater = CameraAnimator::new(0.75, camera.eye, camera.target);
+
+        engine.add_entity((camera, camera_animater));
         engine.add_system(camera_system);
         //Initiates lighting
         let light = Light {
@@ -276,7 +360,7 @@ impl Game for Website {
         engine.add_entity((light_entity, markers::Light));
         let instances = instances_list_cube(vec3(0, 0, 0), vec3(40, 50, 40));
 
-        let animation_handler = AnimationHandler::new(&instances, vec![]);
+        let animation_handler = AnimationHandler::new_from_instances(&instances, vec![]);
         let box_ic = InstanceController::<GpuInstance>::new(instances, &mut engine.render_context);
 
         let box_mat = MaterialBuilder::new()
@@ -325,8 +409,28 @@ impl Game for Website {
             (6485, VoxelObjects::Rust),
             (7200, VoxelObjects::CPlusPLus),
         ]);
-
         self.transition_handler.transition_map = transition_map;
+
+        let camera_middle = CameraPositions::Middle(((-120, 90, -120).into(), (20, 25, 20).into()));
+        let camera_right_side =
+            CameraPositions::RightSide(((-50, 50, -190).into(), (90, 25, -50).into()));
+        let camera_left_side =
+            CameraPositions::LeftSide(((90, 90, -190).into(), (-50, 25, -50).into()));
+        let camera_transition: BTreeMap<_, _> = [
+            (300, camera_middle.clone()),
+            (1300, camera_right_side.clone()),
+            (2100, camera_left_side.clone()),
+            (2950, camera_right_side.clone()),
+            (3850, camera_left_side.clone()),
+            (4750, camera_middle.clone()),
+            (5599, camera_right_side.clone()),
+            (6485, camera_left_side.clone()),
+            (7200, camera_middle.clone()),
+        ]
+        .into_iter()
+        .collect();
+
+        self.camera_transition_handler.transition_map = camera_transition;
     }
 
     fn resize(&mut self, engine: &mut Engine) {

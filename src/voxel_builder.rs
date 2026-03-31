@@ -293,6 +293,146 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
             anim.steps.push(step);
         }
     }
+    pub fn transition_to_point_list(
+        &mut self,
+        points: Vec<Vector3<f32>>,
+        animation_handler: &mut AnimationHandler,
+        amplify: f32,
+    ) {
+        let instance_count = animation_handler.movement_list.len();
+        let cube_count = points.len();
+
+        if cube_count > instance_count {
+            return;
+        }
+
+        let mut rng = rand::rng();
+
+        self.temp_flags.clear();
+        self.temp_flags.resize(instance_count, false);
+
+        for &idx in &self.current_cubes {
+            if idx < instance_count {
+                self.temp_flags[idx] = true;
+            }
+        }
+
+        let reuse_count = cube_count.min(self.current_cubes.len());
+
+        for i in 0..reuse_count {
+            let j = rng.random_range(i..self.current_cubes.len());
+            self.current_cubes.swap(i, j);
+        }
+
+        let mut new_len = reuse_count;
+
+        if cube_count > reuse_count {
+            self.temp_indices.clear();
+
+            for i in 0..instance_count {
+                if !self.temp_flags[i] {
+                    self.temp_indices.push(i);
+                }
+            }
+
+            let needed = cube_count - reuse_count;
+
+            for k in 0..needed {
+                let idx = self.temp_indices[k];
+
+                if new_len < self.current_cubes.len() {
+                    self.current_cubes[new_len] = idx;
+                } else {
+                    self.current_cubes.push(idx);
+                }
+
+                self.temp_flags[idx] = true;
+                new_len += 1;
+            }
+        }
+
+        if cube_count < self.current_cubes.len() {
+            for &idx in &self.current_cubes[cube_count..] {
+                if idx < instance_count {
+                    self.temp_flags[idx] = false;
+                }
+            }
+        }
+
+        self.current_cubes.truncate(cube_count);
+
+        self.temp_indices.clear();
+        self.temp_indices.extend(0..cube_count);
+
+        for i in 0..cube_count {
+            let j = rng.random_range(i..cube_count);
+            self.temp_indices.swap(i, j);
+        }
+
+        for (i, &instance_index) in self.current_cubes.iter().enumerate() {
+            let cube_index = self.temp_indices[i];
+            let cube = points[cube_index] * amplify;
+
+            let anim = &mut animation_handler.movement_list[instance_index];
+
+            let step = AnimationStep {
+                from: anim.base_position,
+                to: cube,
+                t: 1.0,
+                speed: 0.75,
+                animation_transition: AnimationTransition::EaseInEaseOut,
+                state: StepState::Forward,
+            };
+
+            anim.steps.clear();
+            anim.steps.push(step);
+
+            // if use_object_color {
+            //     anim.color = object.color[cube_index];
+            // }
+        }
+
+        let remaining = instance_count - self.current_cubes.len();
+
+        let mut sphere = fibonacci_sphere(remaining, 750.0);
+
+        for i in 0..sphere.len() {
+            let j = rng.random_range(i..sphere.len());
+            sphere.swap(i, j);
+        }
+
+        let mut sphere_index = 0;
+
+        for i in 0..instance_count {
+            if self.temp_flags[i] {
+                continue;
+            }
+
+            let anim = &mut animation_handler.movement_list[i];
+            let point = sphere[sphere_index];
+            sphere_index += 1;
+
+            if anim.base_position.distance(Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            }) >= 500.0
+            {
+                continue;
+            }
+            let step = AnimationStep {
+                from: anim.base_position,
+                to: point,
+                t: 1.0,
+                speed: 0.5,
+                animation_transition: AnimationTransition::EaseInEaseOut,
+                state: StepState::Forward,
+            };
+
+            anim.steps.clear();
+            anim.steps.push(step);
+        }
+    }
 }
 pub fn instances_list_cube(chunk: Vector3<i32>, chunk_size: Vector3<i32>) -> Vec<Instance> {
     (0..(chunk_size.x * chunk_size.y * chunk_size.z))

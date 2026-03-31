@@ -32,6 +32,7 @@ use sparmos_engine::{
 };
 
 use crate::{
+    easter_egg::EasterEgg,
     markers::{self},
     transition::{CameraPositions, TransitionHandler},
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
@@ -45,6 +46,7 @@ pub struct Website {
     pub voxel_handler: VoxelHandler<VoxelObjects>,
     pub transition_handler: TransitionHandler<VoxelObjects>,
     pub camera_transition_handler: TransitionHandler<CameraPositions>,
+    pub bad_apple: EasterEgg,
 }
 
 impl Default for Website {
@@ -57,6 +59,7 @@ impl Default for Website {
             voxel_handler: VoxelHandler::<VoxelObjects>::new(),
             transition_handler: TransitionHandler::<VoxelObjects>::new(BTreeMap::new()),
             camera_transition_handler: TransitionHandler::<CameraPositions>::new(BTreeMap::new()),
+            bad_apple: EasterEgg::default(),
         }
     }
 }
@@ -218,6 +221,32 @@ impl Game for Website {
                         }
                         _ => {}
                     },
+                    KeyCode::Delete => match state {
+                        winit::event::ElementState::Pressed => {
+                            let mut query =
+                                engine.world.query::<(&Renderable, &mut AnimationHandler)>();
+                            let (render, ah) = query.iter().next().expect("No AH");
+
+                            let ic = engine
+                                .render_context
+                                .gpu_objects
+                                .instance_controllers
+                                .get_mut(render.instance_controller_handle)
+                                .unwrap();
+
+                            ah.reset_instance_position_to_current_position(
+                                ic.instances_mut().as_mut(),
+                            );
+                            self.voxel_handler.transition_to_point_list(
+                                self.bad_apple.get_frame(),
+                                ah,
+                                1.0,
+                            );
+                            self.bad_apple.index += 1;
+                        }
+                        _ => {}
+                    },
+
                     KeyCode::Home => match state {
                         winit::event::ElementState::Pressed => {
                             camera_animator.disabled = !camera_animator.disabled;
@@ -430,7 +459,24 @@ impl Game for Website {
         .into_iter()
         .collect();
 
+        //Bad Apple setup
+        let badapple_bin = include_bytes!("../pixels.bin");
+
+        // let pixels = vec![]
+        let badapple = EasterEgg {
+            toggle: false,
+            data: vec![],
+            index: 0,
+            dimensions: PhysicalSize {
+                width: 326,
+                height: 244,
+            },
+            fps: 30.0,
+            length: 6572,
+            raw: badapple_bin.to_vec(),
+        };
         self.camera_transition_handler.transition_map = camera_transition;
+        self.bad_apple = badapple;
     }
 
     fn resize(&mut self, engine: &mut Engine) {

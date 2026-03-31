@@ -1,4 +1,5 @@
 pub mod app;
+pub mod easter_egg;
 pub mod gameloop;
 pub mod markers;
 pub mod transition;

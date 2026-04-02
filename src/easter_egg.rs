@@ -12,6 +12,7 @@ pub struct EasterEgg {
     pub index: i32,
     pub dimensions: PhysicalSize<i32>,
     pub fps: f32,
+    pub elapsed: f32,
     pub length: i32,
     pub raw: Vec<u8>,
 }

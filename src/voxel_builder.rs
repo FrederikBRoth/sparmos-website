@@ -5,7 +5,7 @@
 use cgmath::{MetricSpace, Vector3};
 use dot_vox::load_bytes;
 use rand::{rng, seq::SliceRandom};
-use sparmos_engine::cgmath::{InnerSpace, Rotation3, Zero};
+use sparmos_engine::cgmath::{InnerSpace, Rotation3, Zero, vec3};
 use sparmos_engine::entity::core::instance::Instance;
 use sparmos_engine::entity::entities::cube::new;
 use sparmos_engine::helpers::animation::{
@@ -44,8 +44,8 @@ pub struct VoxelHandler<T: Eq + std::hash::Hash> {
     pub current_cubes: Vec<usize>,
     pub current_object: usize,
 
-    temp_indices: Vec<usize>,
-    temp_flags: Vec<bool>,
+    pub temp_indices: Vec<usize>,
+    pub temp_flags: Vec<bool>,
 }
 impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
     pub fn new() -> Self {
@@ -152,8 +152,6 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
         amplify: f32,
         use_object_color: bool,
     ) {
-        self.current_voxel = Some(object.clone());
-
         let object = match self.get_object(object) {
             Some(o) => o,
             None => return,
@@ -291,6 +289,11 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
 
             anim.steps.clear();
             anim.steps.push(step);
+            anim.color = Vector3 {
+                x: 1.0,
+                y: 1.0,
+                z: 1.0,
+            }
         }
     }
     pub fn transition_to_point_list(
@@ -386,6 +389,7 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
 
             anim.steps.clear();
             anim.steps.push(step);
+            anim.color = vec3(1.0, 1.0, 1.0);
 
             // if use_object_color {
             //     anim.color = object.color[cube_index];
@@ -454,7 +458,7 @@ pub fn instances_list_cube(chunk: Vector3<i32>, chunk_size: Vector3<i32>) -> Vec
             } else {
                 cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(0.0))
             };
-            let default_color = cgmath::Vector3::new(0.0, 0.0, 0.0);
+            let default_color = cgmath::Vector3::new(1.0, 1.0, 1.0);
             let default_size = cgmath::Vector3::new(1.0, 1.0, 1.0);
             let default_bounding = default_size + position;
 

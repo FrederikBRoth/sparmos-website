@@ -1,11 +1,14 @@
 use sparmos_engine::{
     application::{event_loop::AppLifecycle, state::State},
+    entity::entities::cube::new,
     log,
     winit::event::DeviceEvent,
 };
 
 #[cfg(target_arch = "wasm32")]
 use sparmos_engine::{application::event_loop::UserEvent, winit};
+
+use crate::circular_buffer::CircularBuffer;
 
 pub enum WasmEvent {
     ScrollPosition { x: f64, y: f64 },
@@ -18,11 +21,25 @@ impl AppLifecycle<WasmEvent> for EventContainer {
     fn on_user_event(&mut self, state: &mut State, event: WasmEvent) {
         match event {
             WasmEvent::ScrollPosition { x, y } => {
-                state.engine.args.insert("scrolly".to_string(), Box::new(y));
+                state
+                    .engine
+                    .arguments
+                    .args
+                    .insert("scrolly".to_string(), Box::new(y));
                 log::warn!("scroll x: {}, y: {}", x, y);
             }
             WasmEvent::KeyboardButton { keypress } => {
-                log::warn!("keypress: {}", keypress);
+                let buffer = state
+                    .engine
+                    .arguments
+                    .args
+                    .entry("keypress".to_string())
+                    .or_insert(Box::new(CircularBuffer::<String>::new(8)))
+                    .downcast_mut::<CircularBuffer<String>>();
+                if let Some(buffer) = buffer {
+                    buffer.insert(keypress);
+                    log::warn!("{:?}", buffer.to_string())
+                }
             }
         }
     }

@@ -79,14 +79,14 @@ fn vs_main(
 // Fragment shader
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let ambient_strength = 0.1;
+    let ambient_strength = 0.05;
+    let specular_strength = 0.2;
     let shininess = 32.0;
-
-
-    var result: vec3<f32> = in.color;
 
     let N = normalize(in.world_normal);
     let V = normalize(camera.view_pos.xyz - in.world_position);
+
+    var result: vec3<f32> = vec3<f32>(0.0);
 
     for (var i: u32 = 0u; i < u_lights.light_count; i = i + 1u) {
         let light = u_lights.lights[i];
@@ -95,20 +95,22 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let H = normalize(V + L);
 
         // Ambient
-        let ambient = light.color.xyz * ambient_strength;
+        let ambient = ambient_strength * in.color * light.color.xyz;
 
         // Diffuse
         let diff = max(dot(N, L), 0.0);
-        let diffuse = diff * light.color.xyz;
+        let diffuse = diff * in.color * light.color.xyz;
 
-        // Specular (Blinn–Phong)
+        // Specular
         let spec = pow(max(dot(N, H), 0.0), shininess);
-        let specular = spec * light.color.xyz;
+        let specular = specular_strength * spec * light.color.xyz;
 
         result += ambient + diffuse + specular;
     }
 
-    
+    // Optional tone mapping
+    result = result / (result + vec3<f32>(1.0));
+
     return vec4<f32>(result, 1.0);
 }
 

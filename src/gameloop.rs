@@ -1,9 +1,12 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Deref, vec};
 
 use sparmos_engine::{
     application::state::{Game, State, map_value},
     cgmath::{self, *},
-    entity::systems::camera::CameraMode,
+    entity::{
+        core::{entities::World, post_processing::Effect},
+        systems::camera::{CameraMode, MovementKey, MovementPress},
+    },
     helpers::animation::{AnimationHandler, AnimationTransition, StepState},
     log,
     wgpu::{self},
@@ -32,6 +35,7 @@ use sparmos_engine::{
 };
 
 use crate::{
+    circular_buffer::CircularBuffer,
     easter_egg::EasterEgg,
     markers::{self},
     transition::{CameraPositions, TransitionHandler},
@@ -65,48 +69,125 @@ impl Default for Website {
 }
 
 impl Game for Website {
-    fn update(&mut self, dt: std::time::Duration, engine: &mut Engine) {
+    fn update(&mut self, dt: std::time::Duration, engine: &mut Engine, world: &mut World) {
         // let mut camera_system = self.world.query::<&mut CameraSystem>();
         // let camera_system = camera_system.iter().next().unwrap();
-        let mut query = engine.world.query::<(&mut Camera, &mut CameraAnimator)>();
-        let (camera, camera_animator) = query.iter().next().expect("No camera found");
-        let camera_system = engine.resources.get_system_mut::<CameraSystem>();
-        camera_system.update_camera(dt, &engine.render_context, camera);
 
-        camera_animator.update(dt.as_secs_f32(), camera);
-        // camera_animator
-        if let Some(scroll_y) = engine.args.get("scrolly")
-            && let Some(scroll_y) = scroll_y.downcast_ref::<f64>()
-        {
-            if let Some(transition) = self
-                .transition_handler
-                .get_transition_once(*scroll_y as i64)
-            {
-                match transition.clone() {
-                    VoxelObjects::Home => {}
-                    _ => {
-                        let mut query =
-                            engine.world.query::<(&Renderable, &mut AnimationHandler)>();
-                        let (render, ah) = query.iter().next().expect("No AH");
+        world.query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
+            |resources, (camera, camera_animator)| {
+                let camera_system = resources.get_system_mut::<CameraSystem>();
+                camera_system.update_camera(dt, &engine.render_context, camera);
+                camera_animator.update(dt.as_secs_f32(), camera);
+            },
+        );
 
-                        let ic = engine
-                            .render_context
-                            .gpu_objects
-                            .instance_controllers
-                            .get_mut(render.instance_controller_handle)
-                            .unwrap();
-
+        if self.bad_apple.toggle {
+            let target = 1.0 / self.bad_apple.fps;
+            self.bad_apple.elapsed += dt.as_secs_f32();
+            if self.bad_apple.elapsed >= target {
+                world.query_first_with_resources::<(&Renderable, &mut AnimationHandler)>(
+                    |resource, (renderable, ah)| {
+                        let ic =
+                            engine.get_instance_controller(&renderable.instance_controller_handle);
                         ah.reset_instance_position_to_current_position(ic.instances_mut().as_mut());
-                        self.voxel_handler
-                            .transition_to_object(transition, ah, true, 1.0);
-                    }
+                        self.voxel_handler.transition_to_point_list(
+                            self.bad_apple.get_frame(),
+                            ah,
+                            1.0,
+                        );
+                    },
+                );
+                world.query_first_with_resources::<&mut Camera>(|resource, camera| {
+                    log::warn!("{:?}", camera.eye.z);
+
+                    let x = camera.eye.z.abs(); // make x absolute
+                    let max = 3.0;
+                    let min = 0.5;
+                    let k = 0.01; // controls steepness
+                    let midpoint = 275.0; // controls where curve bends (half of 550)
+
+                    let value = min + (max - min) / (1.0 + (x / midpoint).powf(k * midpoint));
+
+                    let camera_system = resource.get_system_mut::<CameraSystem>();
+                    camera_system.speed = value * 0.25;
+                });
+
+                self.bad_apple.index += 1;
+                self.bad_apple.elapsed -= target;
+            }
+        }
+        let buffer_string = engine.arguments.with_arg::<CircularBuffer<String>, _>(
+            "keypress",
+            |buffer| match buffer {
+                Some(buffer) => buffer.to_string(),
+                None => "".to_string(),
+            },
+        );
+
+        if buffer_string == "badapple" && !self.bad_apple.toggle {
+            world.query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
+                |resource, (camera, camera_animator)| {
+                    let camera_system = resource.get_system_mut::<CameraSystem>();
+                    let (bad_apple_eye, bad_apple_target) =
+                        ((162.0, 122.0, -560.0), (162.0, 122.0, 0.0));
+                    camera.eye = bad_apple_eye.into();
+                    camera.target = bad_apple_target.into();
+                    camera_system.set(MovementKey::RotateLeft, MovementPress::Override);
+                    camera.set_camera_mode(CameraMode::AnimatedMode);
+                },
+            );
+
+            world.query_first::<(&Renderable, &markers::Boxes)>(|(render, _)| {
+                engine.change_shader(&render.material_handle, "lights");
+            });
+            self.bad_apple.toggle = true;
+            log::warn!("EE started!");
+        }
+        if buffer_string == "ihatefun" && self.bad_apple.toggle {
+            world.query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
+                |resource, (camera, camera_animator)| {
+                    let camera_system = resource.get_system_mut::<CameraSystem>();
+                    camera_system.set(MovementKey::Left, MovementPress::NotPressed);
+                    camera.set_camera_mode(CameraMode::FreeMode);
+                },
+            );
+
+            world.query_first::<(&Renderable, &markers::Boxes)>(|(render, _)| {
+                engine.change_shader(&render.material_handle, "boxes");
+            });
+            self.bad_apple.toggle = false;
+
+            log::warn!("EE Stopped :(");
+        }
+        let scroll_y = engine
+            .arguments
+            .with_arg::<f64, _>("scrolly", |buffer| *buffer.unwrap_or(&0.0));
+
+        if let Some(transition) = self.transition_handler.get_transition_once(scroll_y as i64) {
+            log::warn!("Transition!!!");
+            match transition.clone() {
+                VoxelObjects::Home => {}
+                _ => {
+                    world.query_first::<(&Renderable, &mut AnimationHandler)>(
+                        |(renderable, ah)| {
+                            let ic = engine
+                                .get_instance_controller(&renderable.instance_controller_handle);
+                            ah.reset_instance_position_to_current_position(
+                                ic.instances_mut().as_mut(),
+                            );
+                            self.voxel_handler
+                                .transition_to_object(transition, ah, true, 1.0);
+                        },
+                    );
                 }
             }
+        }
 
-            if let Some(transition) = self
-                .camera_transition_handler
-                .get_transition_once(*scroll_y as i64)
-            {
+        if let Some(transition) = self
+            .camera_transition_handler
+            .get_transition_once(scroll_y as i64)
+        {
+            world.query_first::<(&mut Camera, &mut CameraAnimator)>(|(camera, camera_animator)| {
                 match transition.clone() {
                     CameraPositions::Middle(position)
                     | CameraPositions::LeftSide(position)
@@ -141,7 +222,7 @@ impl Game for Website {
                         );
                     }
                 }
-            }
+            });
         }
     }
 
@@ -150,13 +231,11 @@ impl Game for Website {
         event: &winit::event::WindowEvent,
         _screen: &winit::dpi::PhysicalSize<u32>,
         engine: &mut Engine,
+        world: &mut World,
     ) {
         // let mut camera_system = self.world.query::<&mut CameraSystem>();
         // let camera_system = camera_system.iter().next().unwrap();
         // let (entity, camera) = state
-        let mut query = engine.world.query::<(&mut Camera, &mut CameraAnimator)>();
-        let (camera, camera_animator) = query.iter().next().expect("No camera found");
-        let camera_system = engine.resources.get_system_mut::<CameraSystem>();
         match event {
             WindowEvent::KeyboardInput {
                 event:
@@ -173,24 +252,21 @@ impl Game for Website {
                     KeyCode::Space => {}
                     KeyCode::PageUp => match state {
                         winit::event::ElementState::Pressed => {
-                            let mut query =
-                                engine.world.query::<(&Renderable, &mut AnimationHandler)>();
-                            let (render, ah) = query.iter().next().expect("No AH");
-
-                            let ic = engine
-                                .render_context
-                                .gpu_objects
-                                .instance_controllers
-                                .get_mut(render.instance_controller_handle)
-                                .unwrap();
-                            ah.reset_instance_position_to_current_position(
-                                ic.instances_mut().as_mut(),
-                            );
-                            self.voxel_handler.transition_to_object(
-                                VoxelObjects::HandballBird,
-                                ah,
-                                true,
-                                1.0,
+                            world.query_first::<(&Renderable, &mut AnimationHandler)>(
+                                |(render, ah)| {
+                                    let ic = engine.get_instance_controller(
+                                        &render.instance_controller_handle,
+                                    );
+                                    ah.reset_instance_position_to_current_position(
+                                        ic.instances_mut().as_mut(),
+                                    );
+                                    self.voxel_handler.transition_to_object(
+                                        VoxelObjects::HandballBird,
+                                        ah,
+                                        true,
+                                        1.0,
+                                    );
+                                },
                             );
                         }
                         _ => {}
@@ -198,8 +274,9 @@ impl Game for Website {
 
                     KeyCode::PageDown => match state {
                         winit::event::ElementState::Pressed => {
-                            let mut query =
-                                engine.world.query::<(&Renderable, &mut AnimationHandler)>();
+                            let mut query = world
+                                .entities
+                                .query::<(&Renderable, &mut AnimationHandler)>();
                             let (render, ah) = query.iter().next().expect("No AH");
 
                             let ic = engine
@@ -223,8 +300,9 @@ impl Game for Website {
                     },
                     KeyCode::Delete => match state {
                         winit::event::ElementState::Pressed => {
-                            let mut query =
-                                engine.world.query::<(&Renderable, &mut AnimationHandler)>();
+                            let mut query = world
+                                .entities
+                                .query::<(&Renderable, &mut AnimationHandler)>();
                             let (render, ah) = query.iter().next().expect("No AH");
 
                             let ic = engine
@@ -248,28 +326,36 @@ impl Game for Website {
                     },
 
                     KeyCode::Home => match state {
-                        winit::event::ElementState::Pressed => {
-                            camera_animator.disabled = !camera_animator.disabled;
-                            if camera_animator.disabled {
-                                camera.set_camera_mode(CameraMode::FreeMode);
-                            } else {
-                                camera.set_camera_mode(CameraMode::FixedMode);
-                            }
+                        winit::event::ElementState::Pressed => {}
+                        _ => {
+                            world.query_first::<(&mut Camera, &mut CameraAnimator)>(
+                                |(camera, camera_animator)| {
+                                    camera_animator.disabled = !camera_animator.disabled;
+                                    if camera_animator.disabled {
+                                        camera.set_camera_mode(CameraMode::FreeMode);
+                                    } else {
+                                        camera.set_camera_mode(CameraMode::AnimatedMode);
+                                    }
+                                },
+                            );
                         }
-                        _ => {}
                     },
                     KeyCode::End => match state {
                         winit::event::ElementState::Pressed => {
-                            camera_animator.add_animation(
-                                None,
-                                Some(AnimationType::Step(AnimationStep::new(
-                                    camera.target.to_vec(),
-                                    camera.target.to_vec() * 2.0,
-                                    0.0,
-                                    camera_animator.speed,
-                                    AnimationTransition::EaseInEaseOut,
-                                    StepState::Forward,
-                                ))),
+                            world.query_first::<(&mut Camera, &mut CameraAnimator)>(
+                                |(camera, camera_animator)| {
+                                    camera_animator.add_animation(
+                                        None,
+                                        Some(AnimationType::Step(AnimationStep::new(
+                                            camera.target.to_vec(),
+                                            camera.target.to_vec() * 2.0,
+                                            0.0,
+                                            camera_animator.speed,
+                                            AnimationTransition::EaseInEaseOut,
+                                            StepState::Forward,
+                                        ))),
+                                    );
+                                },
                             );
                         }
                         _ => {}
@@ -318,43 +404,43 @@ impl Game for Website {
 
             _ => (),
         }
-        camera_system.process_events(event, camera);
+        world.query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
+            |resources, (camera, camera_animator)| {
+                let camera_system = resources.get_system_mut::<CameraSystem>();
+                camera_system.process_events(event, camera);
+            },
+        );
     }
 
     fn setup(&mut self, state: &mut State) {
         let engine = &mut state.engine;
-
+        let world = &mut state.world;
         //Initiates Camera system
         let camera = Camera::new(PhysicalSize::new(
             state.size.width as f32,
             state.size.height as f32,
         ));
         let camera_system = CameraSystem::new(75.0, 50.0, &engine.render_context.device, &camera);
-        //registers system and creates bind_group
-
-        // let eye_anim = AnimationHandler::new(&[Instance::new(vec3(0.0, 0.0, 0.0), 1.0)], vec![]);
-        //
-        // let target_anim = AnimationHandler::new(&[Instance::new(vec3(0.0, 0.0, 0.0), 1.0)], vec![]);
 
         let camera_animater = CameraAnimator::new(0.75, camera.eye, camera.target);
 
-        engine.add_entity((camera, camera_animater));
-        engine.add_system(camera_system);
+        world.add_entity((camera, camera_animater));
+        world.add_system(camera_system);
         //Initiates lighting
         let light = Light {
             position: cgmath::vec3(200.0, 200.0, 1.0),
-            color: cgmath::vec3(1.0, 0.0, 0.0),
+            color: cgmath::vec3(1.0, 1.0, 1.0),
         };
 
         let light2 = Light {
             position: cgmath::vec3(-200.0, -200.0, 1.0),
-            color: cgmath::vec3(0.0, 1.0, 0.0),
+            color: cgmath::vec3(1.0, 1.0, 1.0),
         };
         let light_system = LightSystem::init(
             &[light.clone(), light2.clone()],
             &engine.render_context.device,
         );
-        engine.add_system(light_system);
+        world.add_system(light_system);
 
         //Initiate Shaders
         engine
@@ -375,8 +461,8 @@ impl Game for Website {
             &mut engine.render_context,
         );
         let light_mat = MaterialBuilder::new()
-            .add_layout("camera", engine.resources.get_system::<CameraSystem>())
-            .add_layout("light", engine.resources.get_system::<LightSystem>())
+            .add_layout("camera", world.resources.get_system::<CameraSystem>())
+            .add_layout("light", world.resources.get_system::<LightSystem>())
             .add_shader("lights")
             .build(&cube_mesh, &light_ic, &mut engine.render_context);
 
@@ -386,15 +472,16 @@ impl Game for Website {
             mesh_handle: cube_mesh,
         };
 
-        engine.add_entity((light_entity, markers::Light));
+        world.add_entity((light_entity, markers::Light));
         let instances = instances_list_cube(vec3(0, 0, 0), vec3(40, 50, 40));
 
+        let instances_len = instances.len();
         let animation_handler = AnimationHandler::new_from_instances(&instances, vec![]);
         let box_ic = InstanceController::<GpuInstance>::new(instances, &mut engine.render_context);
 
         let box_mat = MaterialBuilder::new()
-            .add_layout("camera", engine.resources.get_system::<CameraSystem>())
-            .add_layout("light", engine.resources.get_system::<LightSystem>())
+            .add_layout("camera", world.resources.get_system::<CameraSystem>())
+            .add_layout("light", world.resources.get_system::<LightSystem>())
             .add_shader("boxes")
             .build(&cube_mesh, &box_ic, &mut engine.render_context);
         let box_entity = Renderable {
@@ -403,7 +490,7 @@ impl Game for Website {
             mesh_handle: cube_mesh,
         };
 
-        engine.add_entity((box_entity, markers::Boxes, animation_handler));
+        world.add_entity((box_entity, markers::Boxes, animation_handler));
         // }
 
         let castle = include_bytes!("../castle.vox");
@@ -427,6 +514,10 @@ impl Game for Website {
             .add_voxel(hb_fugl, VoxelObjects::HandballBird);
         self.voxel_handler
             .add_voxel(femo_snake, VoxelObjects::FemogfirsSlangen);
+
+        for p in 0..instances_len {
+            self.voxel_handler.current_cubes.push(p);
+        }
         let transition_map: BTreeMap<i64, VoxelObjects> = BTreeMap::from([
             (300, VoxelObjects::Home),
             (1300, VoxelObjects::CSharp),
@@ -472,17 +563,27 @@ impl Game for Website {
                 height: 244,
             },
             fps: 30.0,
+            elapsed: 0.0,
             length: 6572,
             raw: badapple_bin.to_vec(),
         };
+        engine.render_context.post_processing.new_effect(
+            (
+                engine.render_context.config.width,
+                engine.render_context.config.height,
+            )
+                .into(),
+            engine.render_context.config.format,
+            Effect::ChromaticAberration,
+        );
         self.camera_transition_handler.transition_map = camera_transition;
         self.bad_apple = badapple;
     }
 
-    fn resize(&mut self, engine: &mut Engine) {
-        let mut query = engine.world.query::<&mut Camera>();
+    fn resize(&mut self, engine: &mut Engine, world: &mut World) {
+        let mut query = world.entities.query::<&mut Camera>();
         let camera = query.iter().next().expect("No camera found");
-        let camera_system = engine.resources.get_system_mut::<CameraSystem>();
+        let camera_system = world.resources.get_system_mut::<CameraSystem>();
 
         camera.aspect =
             engine.render_context.config.width as f32 / engine.render_context.config.height as f32;

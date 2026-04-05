@@ -1,6 +1,6 @@
 use sparmos_engine::{
     application::{event_loop::AppLifecycle, state::State},
-    entity::entities::cube::new,
+    entity::{audio::audio_handler::AudioHandler, entities::cube::new},
     log,
     winit::event::DeviceEvent,
 };
@@ -26,9 +26,14 @@ impl AppLifecycle<WasmEvent> for EventContainer {
                     .arguments
                     .args
                     .insert("scrolly".to_string(), Box::new(y));
+
                 log::warn!("scroll x: {}, y: {}", x, y);
             }
             WasmEvent::KeyboardButton { keypress } => {
+                if state.engine.audio_triggers.is_some() {
+                    state.engine.init_sound(0.6, 1.2);
+                }
+
                 let buffer = state
                     .engine
                     .arguments

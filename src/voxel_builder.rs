@@ -9,7 +9,7 @@ use sparmos_engine::cgmath::{InnerSpace, Rotation3, Zero, vec3};
 use sparmos_engine::entity::core::instance::Instance;
 use sparmos_engine::entity::entities::cube::new;
 use sparmos_engine::helpers::animation::{
-    AnimationHandler, AnimationStep, AnimationTransition, AnimationType, StepState,
+    AnimationHandler, AnimationStep, AnimationType, Interpolation, StepState,
 };
 use sparmos_engine::{cgmath, log};
 use std::collections::{HashMap, HashSet};
@@ -238,7 +238,7 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
                 to: cube,
                 t: 0.0,
                 speed: 0.75,
-                animation_transition: AnimationTransition::EaseInEaseOut,
+                animation_transition: Interpolation::EaseInEaseOut,
                 state: StepState::Forward,
             };
 
@@ -283,7 +283,7 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
                 to: point,
                 t: 0.0,
                 speed: 0.5,
-                animation_transition: AnimationTransition::EaseInEaseOut,
+                animation_transition: Interpolation::EaseInEaseOut,
                 state: StepState::Forward,
             };
 
@@ -383,7 +383,7 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
                 to: cube,
                 t: 1.0,
                 speed: 0.75,
-                animation_transition: AnimationTransition::EaseInEaseOut,
+                animation_transition: Interpolation::EaseInEaseOut,
                 state: StepState::Forward,
             };
 
@@ -429,7 +429,7 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
                 to: point,
                 t: 1.0,
                 speed: 0.5,
-                animation_transition: AnimationTransition::EaseInEaseOut,
+                animation_transition: Interpolation::EaseInEaseOut,
                 state: StepState::Forward,
             };
 

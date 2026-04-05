@@ -1,13 +1,21 @@
-use std::{collections::BTreeMap, ops::Deref, vec};
+use std::{
+    collections::{BTreeMap, HashMap},
+    ops::Deref,
+    vec,
+};
 
 use sparmos_engine::{
     application::state::{Game, State, map_value},
     cgmath::{self, *},
     entity::{
+        audio::{
+            audio_handler::{AudioHandler, pianokey_to_hz},
+            synth::{EnvelopeSegment, Sound},
+        },
         core::{entities::World, post_processing::Effect},
         systems::camera::{CameraMode, MovementKey, MovementPress},
     },
-    helpers::animation::{AnimationHandler, AnimationTransition, StepState},
+    helpers::animation::{AnimationHandler, Interpolation, StepState},
     log,
     wgpu::{self},
     winit::{
@@ -73,49 +81,6 @@ impl Game for Website {
         // let mut camera_system = self.world.query::<&mut CameraSystem>();
         // let camera_system = camera_system.iter().next().unwrap();
 
-        world.query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
-            |resources, (camera, camera_animator)| {
-                let camera_system = resources.get_system_mut::<CameraSystem>();
-                camera_system.update_camera(dt, &engine.render_context, camera);
-                camera_animator.update(dt.as_secs_f32(), camera);
-            },
-        );
-
-        if self.bad_apple.toggle {
-            let target = 1.0 / self.bad_apple.fps;
-            self.bad_apple.elapsed += dt.as_secs_f32();
-            if self.bad_apple.elapsed >= target {
-                world.query_first_with_resources::<(&Renderable, &mut AnimationHandler)>(
-                    |resource, (renderable, ah)| {
-                        let ic =
-                            engine.get_instance_controller(&renderable.instance_controller_handle);
-                        ah.reset_instance_position_to_current_position(ic.instances_mut().as_mut());
-                        self.voxel_handler.transition_to_point_list(
-                            self.bad_apple.get_frame(),
-                            ah,
-                            1.0,
-                        );
-                    },
-                );
-                world.query_first_with_resources::<&mut Camera>(|resource, camera| {
-                    log::warn!("{:?}", camera.eye.z);
-
-                    let x = camera.eye.z.abs(); // make x absolute
-                    let max = 3.0;
-                    let min = 0.5;
-                    let k = 0.01; // controls steepness
-                    let midpoint = 275.0; // controls where curve bends (half of 550)
-
-                    let value = min + (max - min) / (1.0 + (x / midpoint).powf(k * midpoint));
-
-                    let camera_system = resource.get_system_mut::<CameraSystem>();
-                    camera_system.speed = value * 0.25;
-                });
-
-                self.bad_apple.index += 1;
-                self.bad_apple.elapsed -= target;
-            }
-        }
         let buffer_string = engine.arguments.with_arg::<CircularBuffer<String>, _>(
             "keypress",
             |buffer| match buffer {
@@ -125,21 +90,23 @@ impl Game for Website {
         );
 
         if buffer_string == "badapple" && !self.bad_apple.toggle {
-            world.query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
-                |resource, (camera, camera_animator)| {
-                    let camera_system = resource.get_system_mut::<CameraSystem>();
-                    let (bad_apple_eye, bad_apple_target) =
-                        ((162.0, 122.0, -560.0), (162.0, 122.0, 0.0));
-                    camera.eye = bad_apple_eye.into();
-                    camera.target = bad_apple_target.into();
-                    camera_system.set(MovementKey::RotateLeft, MovementPress::Override);
-                    camera.set_camera_mode(CameraMode::AnimatedMode);
-                },
-            );
+            world.query_first_with_resources::<&mut Camera>(|resource, camera| {
+                let camera_system = resource.get_system_mut::<CameraSystem>();
+                camera_system.set(MovementKey::RotateLeft, MovementPress::Override);
+                camera.set_camera_mode(CameraMode::AnimatedMode);
+                self.bad_apple.init_camera(camera);
+                self.bad_apple.update_camera(camera_system, camera);
+            });
 
-            world.query_first::<(&Renderable, &markers::Boxes)>(|(render, _)| {
+            world.query_first::<(&Renderable, &mut AnimationHandler)>(|(render, ah)| {
+                let ic = engine.get_instance_controller(&render.instance_controller_handle);
+                self.voxel_handler
+                    .transition_to_point_list(self.bad_apple.get_frame(), ah, 1.0);
+
                 engine.change_shader(&render.material_handle, "lights");
             });
+            println!("Test");
+
             self.bad_apple.toggle = true;
             log::warn!("EE started!");
         }
@@ -147,12 +114,15 @@ impl Game for Website {
             world.query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
                 |resource, (camera, camera_animator)| {
                     let camera_system = resource.get_system_mut::<CameraSystem>();
-                    camera_system.set(MovementKey::Left, MovementPress::NotPressed);
+                    camera_system.set(MovementKey::RotateLeft, MovementPress::NotPressed);
                     camera.set_camera_mode(CameraMode::FreeMode);
+                    self.bad_apple.reset_camera(camera_system);
                 },
             );
 
-            world.query_first::<(&Renderable, &markers::Boxes)>(|(render, _)| {
+            world.query_first::<(&Renderable, &mut AnimationHandler)>(|(render, ah)| {
+                self.voxel_handler
+                    .transition_to_point_list(self.bad_apple.get_frame(), ah, 1.0);
                 engine.change_shader(&render.material_handle, "boxes");
             });
             self.bad_apple.toggle = false;
@@ -204,7 +174,7 @@ impl Game for Website {
                                 ),
                                 0.0,
                                 camera_animator.speed,
-                                AnimationTransition::EaseInEaseOut,
+                                Interpolation::EaseInEaseOut,
                                 StepState::Forward,
                             ))),
                             Some(AnimationType::Step(AnimationStep::new(
@@ -216,7 +186,7 @@ impl Game for Website {
                                 ),
                                 0.0,
                                 camera_animator.speed,
-                                AnimationTransition::EaseInEaseOut,
+                                Interpolation::EaseInEaseOut,
                                 StepState::Forward,
                             ))),
                         );
@@ -224,6 +194,38 @@ impl Game for Website {
                 }
             });
         }
+        if self.bad_apple.toggle {
+            let target = 1.0 / self.bad_apple.fps;
+            self.bad_apple.elapsed += dt.as_secs_f32();
+
+            if self.bad_apple.elapsed >= target {
+                world.query_first::<(&Renderable, &mut AnimationHandler)>(|(renderable, ah)| {
+                    let ic = engine.get_instance_controller(&renderable.instance_controller_handle);
+                    ah.reset_instance_position_to_current_position(ic.instances_mut().as_mut());
+                    self.voxel_handler.transition_to_point_list(
+                        self.bad_apple.get_frame(),
+                        ah,
+                        1.0,
+                    );
+                });
+                world.query_first_with_resources::<&mut Camera>(|resource, camera| {
+                    log::warn!("{:?}", camera.eye.z);
+                    let camera_system = resource.get_system_mut::<CameraSystem>();
+                    self.bad_apple.update_camera(camera_system, camera)
+                });
+
+                self.bad_apple.index += 1;
+                self.bad_apple.elapsed -= target;
+            }
+        }
+
+        // world.query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
+        //     |resources, (camera, camera_animator)| {
+        //         let camera_system = resources.get_system_mut::<CameraSystem>();
+        //         camera_system.update_camera(dt, &engine.render_context, camera);
+        //         camera_animator.update(dt.as_secs_f32(), camera);
+        //     },
+        // );
     }
 
     fn process_event(
@@ -266,6 +268,7 @@ impl Game for Website {
                                         true,
                                         1.0,
                                     );
+                                    ah.update_instance(0.0, ic.instances_mut().as_mut());
                                 },
                             );
                         }
@@ -295,6 +298,8 @@ impl Game for Website {
                                 true,
                                 1.0,
                             );
+                            engine.change_shader(&render.material_handle, "boxes");
+                            println!("snake!l!");
                         }
                         _ => {}
                     },
@@ -326,37 +331,50 @@ impl Game for Website {
                     },
 
                     KeyCode::Home => match state {
+                        #[cfg(not(target_arch = "wasm32"))]
                         winit::event::ElementState::Pressed => {}
                         _ => {
-                            world.query_first::<(&mut Camera, &mut CameraAnimator)>(
-                                |(camera, camera_animator)| {
-                                    camera_animator.disabled = !camera_animator.disabled;
-                                    if camera_animator.disabled {
-                                        camera.set_camera_mode(CameraMode::FreeMode);
-                                    } else {
-                                        camera.set_camera_mode(CameraMode::AnimatedMode);
-                                    }
-                                },
-                            );
+                            let buffer = engine
+                                .arguments
+                                .args
+                                .entry("keypress".to_string())
+                                .or_insert(Box::new(CircularBuffer::<String>::new(8)))
+                                .downcast_mut::<CircularBuffer<String>>();
+                            if let Some(buffer) = buffer {
+                                buffer.insert("i".to_string());
+                                buffer.insert("h".to_string());
+                                buffer.insert("a".to_string());
+                                buffer.insert("t".to_string());
+                                buffer.insert("e".to_string());
+                                buffer.insert("f".to_string());
+                                buffer.insert("u".to_string());
+                                buffer.insert("n".to_string());
+
+                                log::warn!("{:?}", buffer.to_string())
+                            }
                         }
                     },
                     KeyCode::End => match state {
+                        #[cfg(not(target_arch = "wasm32"))]
                         winit::event::ElementState::Pressed => {
-                            world.query_first::<(&mut Camera, &mut CameraAnimator)>(
-                                |(camera, camera_animator)| {
-                                    camera_animator.add_animation(
-                                        None,
-                                        Some(AnimationType::Step(AnimationStep::new(
-                                            camera.target.to_vec(),
-                                            camera.target.to_vec() * 2.0,
-                                            0.0,
-                                            camera_animator.speed,
-                                            AnimationTransition::EaseInEaseOut,
-                                            StepState::Forward,
-                                        ))),
-                                    );
-                                },
-                            );
+                            let buffer = engine
+                                .arguments
+                                .args
+                                .entry("keypress".to_string())
+                                .or_insert(Box::new(CircularBuffer::<String>::new(8)))
+                                .downcast_mut::<CircularBuffer<String>>();
+                            if let Some(buffer) = buffer {
+                                buffer.insert("b".to_string());
+                                buffer.insert("a".to_string());
+                                buffer.insert("d".to_string());
+                                buffer.insert("a".to_string());
+                                buffer.insert("p".to_string());
+                                buffer.insert("p".to_string());
+                                buffer.insert("l".to_string());
+                                buffer.insert("e".to_string());
+
+                                log::warn!("{:?}", buffer.to_string())
+                            }
                         }
                         _ => {}
                     },
@@ -401,6 +419,19 @@ impl Game for Website {
                 //     }
                 // }
             }
+            WindowEvent::MouseWheel { delta, .. } => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    use sparmos_engine::winit::event::MouseScrollDelta;
+
+                    if let MouseScrollDelta::LineDelta(_, y) = delta {
+                        engine
+                            .arguments
+                            .args
+                            .insert("scrolly".to_string(), Box::new(*y));
+                    }
+                }
+            }
 
             _ => (),
         }
@@ -424,6 +455,7 @@ impl Game for Website {
 
         let camera_animater = CameraAnimator::new(0.75, camera.eye, camera.target);
 
+        let camera_speed = camera_system.speed;
         world.add_entity((camera, camera_animater));
         world.add_system(camera_system);
         //Initiates lighting
@@ -554,19 +586,15 @@ impl Game for Website {
         let badapple_bin = include_bytes!("../pixels.bin");
 
         // let pixels = vec![]
-        let badapple = EasterEgg {
-            toggle: false,
-            data: vec![],
-            index: 0,
-            dimensions: PhysicalSize {
+        let badapple = EasterEgg::new(
+            PhysicalSize {
                 width: 326,
                 height: 244,
             },
-            fps: 30.0,
-            elapsed: 0.0,
-            length: 6572,
-            raw: badapple_bin.to_vec(),
-        };
+            30.0,
+            badapple_bin.to_vec(),
+            camera_speed,
+        );
         engine.render_context.post_processing.new_effect(
             (
                 engine.render_context.config.width,
@@ -578,6 +606,49 @@ impl Game for Website {
         );
         self.camera_transition_handler.transition_map = camera_transition;
         self.bad_apple = badapple;
+        let keys = vec![
+            "C4", "C#4", "D4", "D#4", "E4", "F4", "F#4", "G4", "G#4", "A4", "A#4", "B4",
+        ];
+        const HARMONICS_PIANO_ORGANIC: [f32; 7] = [1.00, 0.30, 0.10, 0.05, 0.10, 0.7, 0.02];
+        const HARMONICS_BRIGHT: [f32; 16] = [
+            1.00, 0.90, 0.80, 0.70, 0.60, 0.50, 0.42, 0.35, 0.29, 0.24, 0.20, 0.17, 0.14, 0.12,
+            0.10, 0.085,
+        ];
+        const HARMONICS_ANALOG: [f32; 2] = [1.00, 0.78];
+        let sounds = keys
+            .iter()
+            .map(|key| {
+                let freq = pianokey_to_hz(key);
+                println!("{}", freq.unwrap());
+                Sound::new(
+                    HARMONICS_PIANO_ORGANIC.into(),
+                    freq.expect("Key not parsed"),
+                    0.0,
+                    EnvelopeSegment {
+                        length: 0.01,
+                        interpolation: Interpolation::EaseInEaseOut,
+                    },
+                    EnvelopeSegment {
+                        length: 3.0,
+                        interpolation: Interpolation::EaseInEaseOut,
+                    },
+                    EnvelopeSegment {
+                        length: 0.1,
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect::<Vec<Sound>>();
+
+        let audio_triggers = HashMap::from([
+            (KeyCode::KeyF, sounds[0].clone()),
+            (KeyCode::KeyG, sounds[1].clone()),
+            (KeyCode::KeyH, sounds[2].clone()),
+            (KeyCode::KeyJ, sounds[3].clone()),
+            (KeyCode::KeyK, sounds[4].clone()),
+            (KeyCode::KeyL, sounds[5].clone()),
+        ]);
+        AudioHandler::init_sounds(state, audio_triggers);
     }
 
     fn resize(&mut self, engine: &mut Engine, world: &mut World) {
@@ -599,3 +670,5 @@ impl Game for Website {
         // }
     }
 }
+
+fn easter_egg_check_keypresses(event: WindowEvent) {}

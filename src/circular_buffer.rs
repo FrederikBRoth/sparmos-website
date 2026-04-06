@@ -1,4 +1,5 @@
-use std::fmt::Display;
+use core::fmt;
+use std::fmt::{Display, Formatter};
 pub struct CircularBuffer<T> {
     storage: Vec<T>,
     size: usize,
@@ -19,14 +20,16 @@ impl<T: Display> CircularBuffer<T> {
         }
     }
 
-    pub fn to_string(&self) -> String {
-        self.storage
-            .iter()
-            .map(|e| e.to_string())
-            .collect::<Vec<_>>()
-            .join("")
-    }
     pub fn clear(&mut self) {
         self.storage.clear();
+    }
+}
+
+impl<T: Display> Display for CircularBuffer<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        for item in &self.storage {
+            write!(f, "{}", item)?;
+        }
+        Ok(())
     }
 }

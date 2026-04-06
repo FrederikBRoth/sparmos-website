@@ -1,18 +1,12 @@
-// use crate::helpers::animation::AnimationType;
-// use crate::helpers::animation::{
-//     AnimationHandler, AnimationStep, AnimationTransition, EaseInEaseOut,
-// };
 use cgmath::{MetricSpace, Vector3};
 use dot_vox::load_bytes;
-use rand::{rng, seq::SliceRandom};
 use sparmos_engine::cgmath::{InnerSpace, Rotation3, Zero, vec3};
 use sparmos_engine::entity::core::instance::Instance;
-use sparmos_engine::entity::entities::cube::new;
 use sparmos_engine::helpers::animation::{
-    AnimationHandler, AnimationStep, AnimationType, Interpolation, StepState,
+    AnimationHandler, AnimationStep, Interpolation, StepState,
 };
 use sparmos_engine::{cgmath, log};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::f32::consts::PI;
 
 use rand::Rng;
@@ -47,8 +41,9 @@ pub struct VoxelHandler<T: Eq + std::hash::Hash> {
     pub temp_indices: Vec<usize>,
     pub temp_flags: Vec<bool>,
 }
-impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
-    pub fn new() -> Self {
+
+impl<T: Eq + std::hash::Hash + Clone> Default for VoxelHandler<T> {
+    fn default() -> Self {
         Self {
             voxels: vec![],
             voxels_map: HashMap::new(),
@@ -61,7 +56,8 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
             temp_flags: Vec::new(),
         }
     }
-
+}
+impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
     pub fn add_voxel(&mut self, path: &[u8], voxel_type: T) {
         match load_bytes(path) {
             Ok(scene) => {
@@ -98,16 +94,14 @@ impl<T: Eq + std::hash::Hash + Clone> VoxelHandler<T> {
         }
     }
 
-    pub fn add_custom_voxel(&mut self, vector_list: &Vec<Vector3<f32>>, voxel_type: T) {
+    pub fn add_custom_voxel(&mut self, vector_list: &[Vector3<f32>], voxel_type: T) {
         match self.custom_voxel_map.get(&voxel_type) {
             Some(_list) => {
                 let new_voxel = Object {
-                    cubes: vector_list.clone(),
+                    cubes: vector_list.into(),
                     color: vector_list
-                        .clone()
                         .iter()
-                        .enumerate()
-                        .map(|(_x, _)| Vector3::new(1.0 as f32, 1.0 as f32, 1.0 as f32))
+                        .map(|_| Vector3::new(1.0, 1.0, 1.0))
                         .collect(),
                 };
                 self.custom_voxel_map
@@ -487,12 +481,12 @@ fn fibonacci_sphere(points: usize, scalar: f32) -> Vec<Vector3<f32>> {
         let x = f32::cos(theta) * radius;
         let z = f32::sin(theta) * radius;
 
-        vecs.push(Vector3 { x: x, y: y, z: z } * scalar);
+        vecs.push(Vector3 { x, y, z } * scalar);
     }
 
     vecs
 }
 
 fn get_srgb(color: u8) -> f32 {
-    ((color as f32 / 255 as f32 + 0.055) / 1.055).powf(2.4)
+    ((color as f32 / 255_f32 + 0.055) / 1.055).powf(2.4)
 }

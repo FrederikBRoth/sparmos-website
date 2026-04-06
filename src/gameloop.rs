@@ -1,23 +1,37 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    ops::Deref,
     vec,
 };
 
 use sparmos_engine::{
     application::state::{Game, State, map_value},
     cgmath::{self, *},
+    egui::{self, Ui},
     entity::{
         audio::{
-            audio_handler::{AudioHandler, pianokey_to_hz},
+            audio_handler::{AudioCommand, AudioHandler, AudioTrigger, pianokey_to_hz},
             synth::{EnvelopeSegment, Sound},
         },
-        core::{entities::World, post_processing::Effect},
-        systems::camera::{CameraMode, MovementKey, MovementPress},
+        core::{
+            engine::Engine,
+            entities::World,
+            instance::{GpuInstance, Instance, InstanceController},
+            material::MaterialBuilder,
+            post_processing::Effect,
+            render::Renderable,
+        },
+        entities::cube,
+        systems::{
+            camera::{
+                Camera, CameraAnimator, CameraMode, CameraSystem, MovementKey, MovementPress,
+            },
+            light::{Light, LightSystem},
+        },
     },
-    helpers::animation::{AnimationHandler, Interpolation, StepState},
+    helpers::animation::{
+        AnimationHandler, AnimationStep, AnimationType, Interpolation, StepState,
+    },
     log,
-    wgpu::{self},
     winit::{
         self,
         dpi::{PhysicalPosition, PhysicalSize},
@@ -25,26 +39,11 @@ use sparmos_engine::{
         keyboard::KeyCode,
     },
 };
-use sparmos_engine::{
-    entity::{
-        core::{
-            engine::Engine,
-            instance::{GpuInstance, Instance, InstanceController},
-            material::MaterialBuilder,
-            render::Renderable,
-        },
-        entities::cube::{self},
-        systems::{
-            camera::{Camera, CameraAnimator, CameraSystem},
-            light::{Light, LightSystem},
-        },
-    },
-    helpers::animation::{AnimationStep, AnimationType},
-};
 
 use crate::{
     circular_buffer::CircularBuffer,
     easter_egg::EasterEgg,
+    gui::GuiState,
     markers::{self},
     transition::{CameraPositions, TransitionHandler},
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
@@ -59,6 +58,8 @@ pub struct Website {
     pub transition_handler: TransitionHandler<VoxelObjects>,
     pub camera_transition_handler: TransitionHandler<CameraPositions>,
     pub bad_apple: EasterEgg,
+    pub gui_context: GuiState,
+    pub sounds: Vec<Sound>,
 }
 
 impl Default for Website {
@@ -68,10 +69,12 @@ impl Default for Website {
             counter: 0,
             cursor_pos: PhysicalPosition { x: 0.0, y: 0.0 },
             cursor_delta: (0.0, 0.0),
-            voxel_handler: VoxelHandler::<VoxelObjects>::new(),
+            voxel_handler: VoxelHandler::<VoxelObjects>::default(),
             transition_handler: TransitionHandler::<VoxelObjects>::new(BTreeMap::new()),
             camera_transition_handler: TransitionHandler::<CameraPositions>::new(BTreeMap::new()),
             bad_apple: EasterEgg::default(),
+            gui_context: GuiState::default(),
+            sounds: vec![],
         }
     }
 }
@@ -99,7 +102,6 @@ impl Game for Website {
             });
 
             world.query_first::<(&Renderable, &mut AnimationHandler)>(|(render, ah)| {
-                let ic = engine.get_instance_controller(&render.instance_controller_handle);
                 self.voxel_handler
                     .transition_to_point_list(self.bad_apple.get_frame(), ah, 1.0);
 
@@ -111,14 +113,12 @@ impl Game for Website {
             log::warn!("EE started!");
         }
         if buffer_string == "ihatefun" && self.bad_apple.toggle {
-            world.query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
-                |resource, (camera, camera_animator)| {
-                    let camera_system = resource.get_system_mut::<CameraSystem>();
-                    camera_system.set(MovementKey::RotateLeft, MovementPress::NotPressed);
-                    camera.set_camera_mode(CameraMode::FreeMode);
-                    self.bad_apple.reset_camera(camera_system);
-                },
-            );
+            world.query_first_with_resources::<&mut Camera>(|resource, camera| {
+                let camera_system = resource.get_system_mut::<CameraSystem>();
+                camera_system.set(MovementKey::RotateLeft, MovementPress::NotPressed);
+                camera.set_camera_mode(CameraMode::FreeMode);
+                self.bad_apple.reset_camera(camera_system);
+            });
 
             world.query_first::<(&Renderable, &mut AnimationHandler)>(|(render, ah)| {
                 self.voxel_handler
@@ -247,141 +247,144 @@ impl Game for Website {
                         ..
                     },
                 ..
-            } => {
-                let var_name = *state == ElementState::Pressed;
-                let is_pressed = var_name;
-                match keycode {
-                    KeyCode::Space => {}
-                    KeyCode::PageUp => match state {
-                        winit::event::ElementState::Pressed => {
-                            world.query_first::<(&Renderable, &mut AnimationHandler)>(
-                                |(render, ah)| {
-                                    let ic = engine.get_instance_controller(
-                                        &render.instance_controller_handle,
-                                    );
-                                    ah.reset_instance_position_to_current_position(
-                                        ic.instances_mut().as_mut(),
-                                    );
-                                    self.voxel_handler.transition_to_object(
-                                        VoxelObjects::HandballBird,
-                                        ah,
-                                        true,
-                                        1.0,
-                                    );
-                                    ah.update_instance(0.0, ic.instances_mut().as_mut());
-                                },
-                            );
-                        }
-                        _ => {}
-                    },
-
-                    KeyCode::PageDown => match state {
-                        winit::event::ElementState::Pressed => {
-                            let mut query = world
-                                .entities
-                                .query::<(&Renderable, &mut AnimationHandler)>();
-                            let (render, ah) = query.iter().next().expect("No AH");
-
-                            let ic = engine
-                                .render_context
-                                .gpu_objects
-                                .instance_controllers
-                                .get_mut(render.instance_controller_handle)
-                                .unwrap();
-
-                            ah.reset_instance_position_to_current_position(
-                                ic.instances_mut().as_mut(),
-                            );
-                            self.voxel_handler.transition_to_object(
-                                VoxelObjects::FemogfirsSlangen,
-                                ah,
-                                true,
-                                1.0,
-                            );
-                            engine.change_shader(&render.material_handle, "boxes");
-                            println!("snake!l!");
-                        }
-                        _ => {}
-                    },
-                    KeyCode::Delete => match state {
-                        winit::event::ElementState::Pressed => {
-                            let mut query = world
-                                .entities
-                                .query::<(&Renderable, &mut AnimationHandler)>();
-                            let (render, ah) = query.iter().next().expect("No AH");
-
-                            let ic = engine
-                                .render_context
-                                .gpu_objects
-                                .instance_controllers
-                                .get_mut(render.instance_controller_handle)
-                                .unwrap();
-
-                            ah.reset_instance_position_to_current_position(
-                                ic.instances_mut().as_mut(),
-                            );
-                            self.voxel_handler.transition_to_point_list(
-                                self.bad_apple.get_frame(),
-                                ah,
-                                1.0,
-                            );
-                            self.bad_apple.index += 1;
-                        }
-                        _ => {}
-                    },
-
-                    KeyCode::Home => match state {
-                        #[cfg(not(target_arch = "wasm32"))]
-                        winit::event::ElementState::Pressed => {}
-                        _ => {
-                            let buffer = engine
-                                .arguments
-                                .args
-                                .entry("keypress".to_string())
-                                .or_insert(Box::new(CircularBuffer::<String>::new(8)))
-                                .downcast_mut::<CircularBuffer<String>>();
-                            if let Some(buffer) = buffer {
-                                buffer.insert("i".to_string());
-                                buffer.insert("h".to_string());
-                                buffer.insert("a".to_string());
-                                buffer.insert("t".to_string());
-                                buffer.insert("e".to_string());
-                                buffer.insert("f".to_string());
-                                buffer.insert("u".to_string());
-                                buffer.insert("n".to_string());
-
-                                log::warn!("{:?}", buffer.to_string())
-                            }
-                        }
-                    },
-                    KeyCode::End => match state {
-                        #[cfg(not(target_arch = "wasm32"))]
-                        winit::event::ElementState::Pressed => {
-                            let buffer = engine
-                                .arguments
-                                .args
-                                .entry("keypress".to_string())
-                                .or_insert(Box::new(CircularBuffer::<String>::new(8)))
-                                .downcast_mut::<CircularBuffer<String>>();
-                            if let Some(buffer) = buffer {
-                                buffer.insert("b".to_string());
-                                buffer.insert("a".to_string());
-                                buffer.insert("d".to_string());
-                                buffer.insert("a".to_string());
-                                buffer.insert("p".to_string());
-                                buffer.insert("p".to_string());
-                                buffer.insert("l".to_string());
-                                buffer.insert("e".to_string());
-
-                                log::warn!("{:?}", buffer.to_string())
-                            }
-                        }
-                        _ => {}
-                    },
-
-                    _ => (),
+            } => match keycode {
+                KeyCode::Space => {}
+                KeyCode::PageUp => {
+                    if state == &winit::event::ElementState::Pressed {
+                        world.query_first::<(&Renderable, &mut AnimationHandler)>(
+                            |(render, ah)| {
+                                let ic = engine
+                                    .get_instance_controller(&render.instance_controller_handle);
+                                ah.reset_instance_position_to_current_position(
+                                    ic.instances_mut().as_mut(),
+                                );
+                                self.voxel_handler.transition_to_object(
+                                    VoxelObjects::HandballBird,
+                                    ah,
+                                    true,
+                                    1.0,
+                                );
+                                ah.update_instance(0.0, ic.instances_mut().as_mut());
+                            },
+                        );
+                        engine
+                            .audio_handler
+                            .as_mut()
+                            .unwrap()
+                            .update_from_gamelogic(AudioCommand::ForcePlay(
+                                AudioTrigger::GameLogic("test".to_string()),
+                            ));
+                    }
                 }
-            }
+
+                KeyCode::PageDown => {
+                    if state == &winit::event::ElementState::Pressed {
+                        let mut query = world
+                            .entities
+                            .query::<(&Renderable, &mut AnimationHandler)>();
+                        let (render, ah) = query.iter().next().expect("No AH");
+
+                        let ic = engine
+                            .render_context
+                            .gpu_objects
+                            .instance_controllers
+                            .get_mut(render.instance_controller_handle)
+                            .unwrap();
+
+                        ah.reset_instance_position_to_current_position(ic.instances_mut().as_mut());
+                        self.voxel_handler.transition_to_object(
+                            VoxelObjects::FemogfirsSlangen,
+                            ah,
+                            true,
+                            1.0,
+                        );
+                        engine.change_shader(&render.material_handle, "boxes");
+                        println!("snake!l!");
+                        engine
+                            .audio_handler
+                            .as_mut()
+                            .unwrap()
+                            .update_from_gamelogic(AudioCommand::Edit(
+                                AudioTrigger::GameLogic("test".to_string()),
+                                self.sounds[9].clone(),
+                            ));
+                    }
+                }
+                KeyCode::Delete => {
+                    if state == &winit::event::ElementState::Pressed {
+                        let mut query = world
+                            .entities
+                            .query::<(&Renderable, &mut AnimationHandler)>();
+                        let (render, ah) = query.iter().next().expect("No AH");
+
+                        let ic = engine
+                            .render_context
+                            .gpu_objects
+                            .instance_controllers
+                            .get_mut(render.instance_controller_handle)
+                            .unwrap();
+
+                        ah.reset_instance_position_to_current_position(ic.instances_mut().as_mut());
+                        self.voxel_handler.transition_to_point_list(
+                            self.bad_apple.get_frame(),
+                            ah,
+                            1.0,
+                        );
+                        self.bad_apple.index += 1;
+                    }
+                }
+
+                KeyCode::Home => match state {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    winit::event::ElementState::Pressed => {}
+                    _ => {
+                        let buffer = engine
+                            .arguments
+                            .args
+                            .entry("keypress".to_string())
+                            .or_insert(Box::new(CircularBuffer::<String>::new(8)))
+                            .downcast_mut::<CircularBuffer<String>>();
+                        if let Some(buffer) = buffer {
+                            buffer.insert("i".to_string());
+                            buffer.insert("h".to_string());
+                            buffer.insert("a".to_string());
+                            buffer.insert("t".to_string());
+                            buffer.insert("e".to_string());
+                            buffer.insert("f".to_string());
+                            buffer.insert("u".to_string());
+                            buffer.insert("n".to_string());
+
+                            log::warn!("{:?}", buffer.to_string())
+                        }
+                    }
+                },
+                KeyCode::End => match state {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    winit::event::ElementState::Pressed => {
+                        let buffer = engine
+                            .arguments
+                            .args
+                            .entry("keypress".to_string())
+                            .or_insert(Box::new(CircularBuffer::<String>::new(8)))
+                            .downcast_mut::<CircularBuffer<String>>();
+                        if let Some(buffer) = buffer {
+                            buffer.insert("b".to_string());
+                            buffer.insert("a".to_string());
+                            buffer.insert("d".to_string());
+                            buffer.insert("a".to_string());
+                            buffer.insert("p".to_string());
+                            buffer.insert("p".to_string());
+                            buffer.insert("l".to_string());
+                            buffer.insert("e".to_string());
+
+                            log::warn!("{:?}", buffer.to_string())
+                        }
+                    }
+                    _ => {}
+                },
+
+                _ => (),
+            },
             WindowEvent::MouseInput { state, button, .. } => {
                 match button {
                     winit::event::MouseButton::Left => match state {
@@ -435,12 +438,10 @@ impl Game for Website {
 
             _ => (),
         }
-        world.query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
-            |resources, (camera, camera_animator)| {
-                let camera_system = resources.get_system_mut::<CameraSystem>();
-                camera_system.process_events(event, camera);
-            },
-        );
+        world.query_first_with_resources::<&mut Camera>(|resources, camera| {
+            let camera_system = resources.get_system_mut::<CameraSystem>();
+            camera_system.process_events(event, camera);
+        });
     }
 
     fn setup(&mut self, state: &mut State) {
@@ -610,11 +611,6 @@ impl Game for Website {
             "C4", "C#4", "D4", "D#4", "E4", "F4", "F#4", "G4", "G#4", "A4", "A#4", "B4",
         ];
         const HARMONICS_PIANO_ORGANIC: [f32; 7] = [1.00, 0.30, 0.10, 0.05, 0.10, 0.7, 0.02];
-        const HARMONICS_BRIGHT: [f32; 16] = [
-            1.00, 0.90, 0.80, 0.70, 0.60, 0.50, 0.42, 0.35, 0.29, 0.24, 0.20, 0.17, 0.14, 0.12,
-            0.10, 0.085,
-        ];
-        const HARMONICS_ANALOG: [f32; 2] = [1.00, 0.78];
         let sounds = keys
             .iter()
             .map(|key| {
@@ -641,34 +637,57 @@ impl Game for Website {
             .collect::<Vec<Sound>>();
 
         let audio_triggers = HashMap::from([
-            (KeyCode::KeyF, sounds[0].clone()),
-            (KeyCode::KeyG, sounds[1].clone()),
-            (KeyCode::KeyH, sounds[2].clone()),
-            (KeyCode::KeyJ, sounds[3].clone()),
-            (KeyCode::KeyK, sounds[4].clone()),
-            (KeyCode::KeyL, sounds[5].clone()),
+            (AudioTrigger::Keyboard(KeyCode::KeyF), sounds[0].clone()),
+            (AudioTrigger::Keyboard(KeyCode::KeyG), sounds[2].clone()),
+            (AudioTrigger::Keyboard(KeyCode::KeyH), sounds[4].clone()),
+            (AudioTrigger::Keyboard(KeyCode::KeyJ), sounds[5].clone()),
+            (AudioTrigger::Keyboard(KeyCode::KeyK), sounds[7].clone()),
+            (AudioTrigger::Keyboard(KeyCode::KeyL), sounds[9].clone()),
+            (
+                AudioTrigger::Keyboard(KeyCode::Semicolon),
+                sounds[11].clone(),
+            ),
+            (
+                AudioTrigger::GameLogic("test".to_string()),
+                sounds[6].clone(),
+            ),
         ]);
         AudioHandler::init_sounds(state, audio_triggers);
+        self.sounds = sounds;
     }
 
     fn resize(&mut self, engine: &mut Engine, world: &mut World) {
         let mut query = world.entities.query::<&mut Camera>();
         let camera = query.iter().next().expect("No camera found");
-        let camera_system = world.resources.get_system_mut::<CameraSystem>();
+        // let camera_system = world.resources.get_system_mut::<CameraSystem>();
 
         camera.aspect =
             engine.render_context.config.width as f32 / engine.render_context.config.height as f32;
         println!("{:?}", camera.aspect);
         let new_fov = map_value(camera.aspect, 0.8, 1.88, 25.0, 55.0);
         camera.fovy = new_fov;
-        // if camera.aspect < camera.camera_animator.aspect_ratio_limit {
-        //     let eye = Point3::new(110.0, 90.0, -130.0);
-        //     let target = Point3::new(20.0, 25.0, 20.0);
-        //     camera.eye = eye;
-        //     camera.target = target;
-        //     camera.fovy = 90.0;
-        // }
+    }
+
+    fn gui_setup(&mut self, ui: &mut Ui) {
+        egui::Panel::top("top_panel")
+            .resizable(false)
+            .show_inside(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if ui
+                        .toggle_value(&mut self.gui_context.bezier_toggled, "Bezier")
+                        .clicked()
+                    {};
+                });
+            });
+
+        if self.gui_context.bezier_toggled {
+            egui::Panel::left("bezier panel")
+                .resizable(false)
+                .min_size(300.0)
+                .show_inside(ui, |ui| {
+                    ui.heading("Bezier Editor");
+                    self.gui_context.bezier_editor.ui(ui);
+                });
+        };
     }
 }
-
-fn easter_egg_check_keypresses(event: WindowEvent) {}

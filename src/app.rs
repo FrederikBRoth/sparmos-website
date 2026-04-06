@@ -1,6 +1,5 @@
 use sparmos_engine::{
     application::{event_loop::AppLifecycle, state::State},
-    entity::{audio::audio_handler::AudioHandler, entities::cube::new},
     log,
     winit::event::DeviceEvent,
 };
@@ -97,11 +96,8 @@ impl AppLifecycle<WasmEvent> for EventContainer {
     }
 
     fn on_device_event(&mut self, event: DeviceEvent, _state: &mut State) {
-        match event {
-            DeviceEvent::MouseMotion { delta } => {
-                log::debug!("Mouse delta: {:?}", delta);
-            }
-            _ => {}
+        if let DeviceEvent::MouseMotion { delta } = event {
+            log::debug!("Mouse delta: {:?}", delta);
         }
     }
 }

@@ -9,9 +9,6 @@ pub mod voxel_builder;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-#[cfg(target_arch = "wasm32")]
-use crate::gameloop::Website;
-
 // use app; // Removed because there is no external crate or module named 'app'
 
 #[cfg(target_arch = "wasm32")]

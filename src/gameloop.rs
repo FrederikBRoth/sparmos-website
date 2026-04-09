@@ -10,7 +10,7 @@ use sparmos_engine::{
     entity::{
         audio::{
             audio_handler::{AudioCommand, AudioHandler, AudioTrigger, pianokey_to_hz},
-            synth::{EnvelopeSegment, Sound},
+            synth::{EnvelopeSegment, Sound, Waveform},
         },
         core::{
             engine::Engine,
@@ -43,7 +43,7 @@ use sparmos_engine::{
 use crate::{
     circular_buffer::CircularBuffer,
     easter_egg::EasterEgg,
-    gui::GuiState,
+    gui::{GuiState, Ratio, RatioHandle, WaveformVisualizer},
     markers::{self},
     transition::{CameraPositions, TransitionHandler},
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
@@ -422,17 +422,15 @@ impl Game for Website {
                 //     }
                 // }
             }
+            #[cfg(not(target_arch = "wasm32"))]
             WindowEvent::MouseWheel { delta, .. } => {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    use sparmos_engine::winit::event::MouseScrollDelta;
+                use sparmos_engine::winit::event::MouseScrollDelta;
 
-                    if let MouseScrollDelta::LineDelta(_, y) = delta {
-                        engine
-                            .arguments
-                            .args
-                            .insert("scrolly".to_string(), Box::new(*y));
-                    }
+                if let MouseScrollDelta::LineDelta(_, y) = delta {
+                    engine
+                        .arguments
+                        .args
+                        .insert("scrolly".to_string(), Box::new(*y));
                 }
             }
 
@@ -607,7 +605,7 @@ impl Game for Website {
         );
         self.camera_transition_handler.transition_map = camera_transition;
         self.bad_apple = badapple;
-        let keys = vec![
+        let keys = [
             "C4", "C#4", "D4", "D#4", "E4", "F4", "F#4", "G4", "G#4", "A4", "A#4", "B4",
         ];
         const HARMONICS_PIANO_ORGANIC: [f32; 7] = [1.00, 0.30, 0.10, 0.05, 0.10, 0.7, 0.02];
@@ -620,12 +618,13 @@ impl Game for Website {
                     HARMONICS_PIANO_ORGANIC.into(),
                     freq.expect("Key not parsed"),
                     0.0,
+                    Waveform::SawtoothWave,
                     EnvelopeSegment {
                         length: 0.01,
                         interpolation: Interpolation::EaseInEaseOut,
                     },
                     EnvelopeSegment {
-                        length: 3.0,
+                        length: 1.98,
                         interpolation: Interpolation::EaseInEaseOut,
                     },
                     EnvelopeSegment {
@@ -653,13 +652,23 @@ impl Game for Website {
             ),
         ]);
         AudioHandler::init_sounds(state, audio_triggers);
+        self.gui_context.waveform_visualizer.handles = [
+            RatioHandle {
+                ratio: 0.3,
+                kind: Ratio::AttackDecayBoundary,
+            },
+            RatioHandle {
+                ratio: 0.8,
+                kind: Ratio::DecayRefrainBoundary,
+            },
+        ]
+        .into();
         self.sounds = sounds;
     }
 
     fn resize(&mut self, engine: &mut Engine, world: &mut World) {
         let mut query = world.entities.query::<&mut Camera>();
         let camera = query.iter().next().expect("No camera found");
-        // let camera_system = world.resources.get_system_mut::<CameraSystem>();
 
         camera.aspect =
             engine.render_context.config.width as f32 / engine.render_context.config.height as f32;
@@ -668,13 +677,20 @@ impl Game for Website {
         camera.fovy = new_fov;
     }
 
-    fn gui_setup(&mut self, ui: &mut Ui) {
+    fn gui_setup(&mut self, dt: std::time::Duration, engine: &mut Engine, ui: &mut Ui) {
         egui::Panel::top("top_panel")
-            .resizable(false)
+            .resizable(true)
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     if ui
                         .toggle_value(&mut self.gui_context.bezier_toggled, "Bezier")
+                        .clicked()
+                    {};
+                    if ui
+                        .toggle_value(
+                            &mut self.gui_context.waveform_visualizer_toggled,
+                            "Waveform Visualizer",
+                        )
                         .clicked()
                     {};
                 });
@@ -682,12 +698,16 @@ impl Game for Website {
 
         if self.gui_context.bezier_toggled {
             egui::Panel::left("bezier panel")
-                .resizable(false)
+                .resizable(true)
                 .min_size(300.0)
                 .show_inside(ui, |ui| {
                     ui.heading("Bezier Editor");
                     self.gui_context.bezier_editor.ui(ui);
                 });
         };
+
+        if self.gui_context.waveform_visualizer_toggled {
+            self.gui_context.waveform_visualizer.ui(dt, engine, ui);
+        }
     }
 }

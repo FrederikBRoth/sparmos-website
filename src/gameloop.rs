@@ -43,7 +43,7 @@ use sparmos_engine::{
 use crate::{
     circular_buffer::CircularBuffer,
     easter_egg::EasterEgg,
-    gui::{GuiState, Ratio, RatioHandle, WaveformVisualizer},
+    gui::gui::{GuiState, Ratio, RatioHandle, WaveformVisualizer},
     markers::{self},
     transition::{CameraPositions, TransitionHandler},
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},

@@ -8,8 +8,7 @@ use sparmos_engine::{
             audio_handler::{AudioCommand, AudioTrigger, hz_to_index, index_to_hz, index_to_key},
             synth::{AudioState, EnvelopeSegment, Sound, Waveform},
         },
-        core::engine::{self, Engine},
-        entities::cube::new,
+        core::engine::Engine,
     },
     helpers::animation::{Interpolation, castaljau_point},
 };
@@ -17,9 +16,9 @@ use sparmos_engine::{
 #[derive(Default)]
 pub struct GuiState {
     pub bezier_toggled: bool,
-    pub waveform_visualizer_toggled: bool,
+    pub sound_editor_toggled: bool,
     pub bezier_editor: BezierEditor,
-    pub waveform_visualizer: WaveformVisualizer,
+    pub sound_editor: SoundEditor,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Ratio {
@@ -53,7 +52,6 @@ pub struct EnvelopeHandle {
     scale: f32,
     offset: f32,
     lerp: fn(&Sound, f32) -> (f32, f32),
-    update_length: fn(&mut Sound, f32),
     get_length: fn(&Sound) -> f32,
     get_envelope_interp: fn(&mut Sound) -> &mut Interpolation,
     get_envelope: fn(&mut Sound) -> &mut EnvelopeSegment,
@@ -65,10 +63,6 @@ impl EnvelopeHandle {
             scale,
             offset,
             lerp: |sound: &Sound, t: f32| sound.envelope.attack.interpolation.lerp(t, false),
-            update_length: |sound: &mut Sound, t: f32| {
-                let new_length = sound.envelope.attack.length + t;
-                sound.envelope.attack.length = round_to_step(new_length, 0.1);
-            },
             get_length: |sound: &Sound| sound.envelope.attack.length,
             get_envelope_interp: |sound: &mut Sound| &mut sound.envelope.attack.interpolation,
             get_envelope: |sound: &mut Sound| &mut sound.envelope.attack,
@@ -81,10 +75,6 @@ impl EnvelopeHandle {
             scale,
             offset,
             lerp: |sound: &Sound, t: f32| sound.envelope.decay.interpolation.lerp(t, true),
-            update_length: |sound: &mut Sound, t: f32| {
-                let new_length = sound.envelope.decay.length + t;
-                sound.envelope.decay.length = round_to_step(new_length, 0.1);
-            },
             get_length: |sound: &Sound| sound.envelope.decay.length,
             get_envelope_interp: |sound: &mut Sound| &mut sound.envelope.decay.interpolation,
             get_envelope: |sound: &mut Sound| &mut sound.envelope.decay,
@@ -97,10 +87,6 @@ impl EnvelopeHandle {
             scale,
             offset,
             lerp: |sound: &Sound, t: f32| sound.envelope.refrain.interpolation.lerp(t, true),
-            update_length: |sound: &mut Sound, t: f32| {
-                let new_length = sound.envelope.refrain.length + t;
-                sound.envelope.refrain.length = round_to_step(new_length, 0.1);
-            },
             get_length: |sound: &Sound| sound.envelope.refrain.length,
             get_envelope_interp: |sound: &mut Sound| &mut sound.envelope.refrain.interpolation,
             get_envelope: |sound: &mut Sound| &mut sound.envelope.refrain,
@@ -183,9 +169,9 @@ pub fn draw_handle(
     painter.line_segment([top, bottom], egui::Stroke::new(2.0, color));
 }
 #[derive(Default)]
-pub struct WaveformVisualizer {
+pub struct SoundEditor {
     pub sample_time: f32,
-    pub sound: Vec<Sound>,
+    pub sounds: Vec<Sound>,
     pub selected_sound: Option<usize>,
     pub audio_state: AudioState,
     pub envelope_edge_points: Vec<egui::Pos2>,
@@ -198,7 +184,7 @@ pub struct WaveformVisualizer {
     pub bezier_editor: BezierComponent,
 }
 
-impl WaveformVisualizer {
+impl SoundEditor {
     pub fn ui(&mut self, dt: std::time::Duration, engine: &mut Engine, ui: &mut egui::Ui) {
         egui::Window::new("Sound editor")
             .resizable(true)
@@ -224,7 +210,7 @@ impl WaveformVisualizer {
                 let mut changed = false;
 
                 if let Some(selected_sound) = self.selected_sound
-                    && let Some(sound) = self.sound.get_mut(selected_sound)
+                    && let Some(sound) = self.sounds.get_mut(selected_sound)
                 {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
@@ -345,9 +331,28 @@ impl WaveformVisualizer {
                                     curve_points.push(to_screen.transform_pos(p));
                                 }
 
+                                // red offset
+                                painter.add(egui::Shape::line(
+                                    curve_points
+                                        .iter()
+                                        .map(|p| *p + egui::vec2(-1.0, 0.0))
+                                        .collect(),
+                                    egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 0, 0)),
+                                ));
+
+                                // blue offse
+                                painter.add(egui::Shape::line(
+                                    curve_points
+                                        .iter()
+                                        .map(|p| *p + egui::vec2(1.5, 0.0))
+                                        .collect(),
+                                    egui::Stroke::new(1.5, egui::Color32::from_rgb(0, 100, 255)),
+                                ));
+
+                                // main white line
                                 painter.add(egui::Shape::line(
                                     curve_points.clone(),
-                                    egui::Stroke::new(2.0, egui::Color32::RED),
+                                    egui::Stroke::new(2.0, egui::Color32::WHITE),
                                 ));
 
                                 curve_points.clear();
@@ -516,6 +521,7 @@ impl WaveformVisualizer {
                     });
                     if changed {
                         sound.phases = sound.harmonics.clone();
+
                         engine
                             .get_audio_handler()
                             .update_from_gamelogic(AudioCommand::Edit(
@@ -557,7 +563,7 @@ impl WaveformVisualizer {
                                 ..Default::default()
                             },
                         );
-                        self.sound.push(sound.clone());
+                        self.sounds.push(sound.clone());
                         self.selected_sound = Some(0);
                         engine
                             .get_audio_handler()
@@ -567,7 +573,15 @@ impl WaveformVisualizer {
                             ));
                     }
                 });
-                // ui.allocate_space(ui.available_size());
+
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for (i, sound) in self.sounds.iter_mut().enumerate() {
+                            sound_preview(i, &mut self.selected_sound, sound, engine, ui);
+                        }
+                    });
             });
     }
 
@@ -615,6 +629,118 @@ pub fn harmonic_sliders(harmonics: &mut Vec<f32>, ui: &mut Ui) -> bool {
         }
     });
     changed
+}
+fn build_curve_points(
+    interpolation: &Interpolation,
+    offset: f32,
+    width: f32,
+    flip: bool,
+    to_screen: &egui::emath::RectTransform,
+) -> Vec<egui::Pos2> {
+    let mut points = Vec::new();
+    let steps = 16.0;
+
+    for i in 0..=16 {
+        let t = i as f32 / steps;
+        let (y, mut x) = interpolation.lerp(t, flip);
+
+        //hacky solution to keep proper custom bezier graph structure
+        //is purely visual
+        x = if x == 0.0 {
+            offset + (t * width)
+        } else {
+            offset + (x * width)
+        };
+
+        let point = egui::pos2(x, y);
+        points.push(to_screen.transform_pos(point));
+    }
+
+    points
+}
+pub fn sound_preview(
+    index: usize,
+    selected_sound: &mut Option<usize>,
+    sound: &mut Sound,
+    engine: &mut Engine,
+    ui: &mut Ui,
+) {
+    let fill = if let Some(selected_index) = selected_sound
+        && *selected_index == index
+    {
+        ui.visuals().selection.bg_fill
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+
+    egui::Frame::new()
+        .fill(fill)
+        .corner_radius(egui::CornerRadius::same(4))
+        .inner_margin(egui::Margin::same(6))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| ui.label(sound.to_string()));
+            ui.horizontal(|ui| {
+                ui.label("Envelope layout");
+
+                let (rect, _) = ui.allocate_exact_size([200.0, 20.0].into(), egui::Sense::hover());
+
+                let painter = ui.painter_at(rect);
+                painter.rect_filled(rect, 0.0, Color32::BLACK);
+
+                let to_screen = egui::emath::RectTransform::from_to(
+                    egui::Rect::from_min_max(egui::pos2(0.0, 1.0), egui::pos2(1.0, 0.0)),
+                    rect,
+                );
+
+                let mut curve_points = Vec::new();
+
+                curve_points.extend(build_curve_points(
+                    &sound.envelope.attack.interpolation,
+                    0.0,
+                    0.4,
+                    false,
+                    &to_screen,
+                ));
+
+                curve_points.extend(build_curve_points(
+                    &sound.envelope.decay.interpolation,
+                    0.4,
+                    0.4,
+                    true,
+                    &to_screen,
+                ));
+
+                painter.add(egui::Shape::line(
+                    curve_points,
+                    egui::Stroke::new(2.0, egui::Color32::RED),
+                ));
+
+                let refrain_points = build_curve_points(
+                    &sound.envelope.refrain.interpolation,
+                    0.8,
+                    0.2,
+                    true,
+                    &to_screen,
+                );
+
+                painter.add(egui::Shape::line(
+                    refrain_points,
+                    egui::Stroke::new(2.0, egui::Color32::RED),
+                ));
+            });
+            let response = ui.interact(ui.max_rect(), ui.id().with(index), egui::Sense::click());
+            if response.clicked() {
+                *selected_sound = Some(index);
+                sound.phases = sound.harmonics.clone();
+                engine
+                    .get_audio_handler()
+                    .update_from_gamelogic(AudioCommand::Edit(
+                        AudioTrigger::gamelogic("waveform_visualizer_sound"),
+                        sound.clone(),
+                    ));
+            }
+            ui.allocate_space([ui.available_size().x, 0.0].into());
+        });
 }
 
 pub struct CustomInterpolationEditor;

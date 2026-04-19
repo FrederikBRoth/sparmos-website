@@ -43,7 +43,7 @@ use sparmos_engine::{
 use crate::{
     circular_buffer::CircularBuffer,
     easter_egg::EasterEgg,
-    gui::gui::{GuiState, Ratio, RatioHandle, WaveformVisualizer},
+    gui::gui::{GuiState, Ratio, RatioHandle, SoundEditor},
     markers::{self},
     transition::{CameraPositions, TransitionHandler},
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
@@ -652,7 +652,7 @@ impl Game for Website {
             ),
         ]);
         AudioHandler::init_sounds(state, audio_triggers);
-        self.gui_context.waveform_visualizer.handles = [
+        self.gui_context.sound_editor.handles = [
             RatioHandle {
                 ratio: 0.3,
                 kind: Ratio::AttackDecayBoundary,
@@ -678,19 +678,37 @@ impl Game for Website {
     }
 
     fn gui_setup(&mut self, dt: std::time::Duration, engine: &mut Engine, ui: &mut Ui) {
+        let mut visuals = egui::Visuals::dark();
+
+        visuals.override_text_color = Some(egui::Color32::from_gray(220));
+
+        // Panels
+        visuals.panel_fill = egui::Color32::from_rgb(10, 10, 10);
+        visuals.window_fill = egui::Color32::from_rgb(15, 15, 15);
+
+        // Subtle separation instead of borders
+        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(12, 12, 12);
+        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(18, 18, 18);
+
+        // Remove harsh outlines
+        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
+        visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+        visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::GRAY);
+
+        // Selection (use your red here)
+        visuals.selection.bg_fill = egui::Color32::from_rgb(120, 0, 0);
+
+        ui.set_visuals(visuals);
         egui::Panel::top("top_panel")
-            .resizable(true)
+            .resizable(false)
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
+                    // if ui
+                    //     .toggle_value(&mut self.gui_context.bezier_toggled, "Bezier")
+                    //     .clicked()
+                    // {};
                     if ui
-                        .toggle_value(&mut self.gui_context.bezier_toggled, "Bezier")
-                        .clicked()
-                    {};
-                    if ui
-                        .toggle_value(
-                            &mut self.gui_context.waveform_visualizer_toggled,
-                            "Waveform Visualizer",
-                        )
+                        .toggle_value(&mut self.gui_context.sound_editor_toggled, "Sound Editor")
                         .clicked()
                     {};
                 });
@@ -706,8 +724,8 @@ impl Game for Website {
                 });
         };
 
-        if self.gui_context.waveform_visualizer_toggled {
-            self.gui_context.waveform_visualizer.ui(dt, engine, ui);
+        if self.gui_context.sound_editor_toggled {
+            self.gui_context.sound_editor.ui(dt, engine, ui);
         }
     }
 }

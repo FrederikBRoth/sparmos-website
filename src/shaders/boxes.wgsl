@@ -7,7 +7,6 @@ struct CameraUniform {
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
 
-
 struct Light {
     position: vec3<f32>, // xyz + padding
     color: vec3<f32>,  // rgb + padding
@@ -35,7 +34,7 @@ struct InstanceInput {
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
     @location(0) color: vec3<f32>,
-    @location(1)  world_normal: vec3<f32>,
+    @location(1) world_normal: vec3<f32>,
     @location(2) world_position: vec3<f32>,
 }
 
@@ -121,16 +120,14 @@ fn quat_to_mat3(q: vec4<f32>) -> mat3x3<f32> {
     let w = q.w;
 
     return mat3x3<f32>(
-        1.0 - 2.0 * (y*y + z*z),
-        2.0 * (x*y + z*w),
-        2.0 * (x*z - y*w),
-
-        2.0 * (x*y - z*w),
-        1.0 - 2.0 * (x*x + z*z),
-        2.0 * (y*z + x*w),
-
-        2.0 * (x*z + y*w),
-        2.0 * (y*z - x*w),
-        1.0 - 2.0 * (x*x + y*y)
+        1.0 - 2.0 * (y * y + z * z),
+        2.0 * (x * y + z * w),
+        2.0 * (x * z - y * w),
+        2.0 * (x * y - z * w),
+        1.0 - 2.0 * (x * x + z * z),
+        2.0 * (y * z + x * w),
+        2.0 * (x * z + y * w),
+        2.0 * (y * z - x * w),
+        1.0 - 2.0 * (x * x + y * y)
     );
 }

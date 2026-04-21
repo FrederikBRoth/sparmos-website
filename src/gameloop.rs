@@ -43,7 +43,7 @@ use sparmos_engine::{
 use crate::{
     circular_buffer::CircularBuffer,
     easter_egg::EasterEgg,
-    gui::gui::{GuiState, Ratio, RatioHandle, SoundEditor},
+    gui::sound_editor::{GuiState, Ratio, RatioHandle, SoundEditor},
     markers::{self},
     transition::{CameraPositions, TransitionHandler},
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
@@ -618,7 +618,7 @@ impl Game for Website {
                     HARMONICS_PIANO_ORGANIC.into(),
                     freq.expect("Key not parsed"),
                     0.0,
-                    Waveform::SawtoothWave,
+                    Waveform::SineWave,
                     EnvelopeSegment {
                         length: 0.01,
                         interpolation: Interpolation::EaseInEaseOut,
@@ -650,6 +650,16 @@ impl Game for Website {
                 AudioTrigger::GameLogic("test".to_string()),
                 sounds[6].clone(),
             ),
+            (AudioTrigger::GameLogic("0".to_string()), sounds[0].clone()),
+            (AudioTrigger::GameLogic("1".to_string()), sounds[1].clone()),
+            (AudioTrigger::GameLogic("2".to_string()), sounds[2].clone()),
+            (AudioTrigger::GameLogic("3".to_string()), sounds[3].clone()),
+            (AudioTrigger::GameLogic("4".to_string()), sounds[4].clone()),
+            (AudioTrigger::GameLogic("5".to_string()), sounds[5].clone()),
+            (AudioTrigger::GameLogic("6".to_string()), sounds[6].clone()),
+            (AudioTrigger::GameLogic("7".to_string()), sounds[7].clone()),
+            (AudioTrigger::GameLogic("8".to_string()), sounds[8].clone()),
+            (AudioTrigger::GameLogic("9".to_string()), sounds[9].clone()),
         ]);
         AudioHandler::init_sounds(state, audio_triggers);
         self.gui_context.sound_editor.handles = [
@@ -703,10 +713,10 @@ impl Game for Website {
             .resizable(false)
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
-                    // if ui
-                    //     .toggle_value(&mut self.gui_context.bezier_toggled, "Bezier")
-                    //     .clicked()
-                    // {};
+                    if ui
+                        .toggle_value(&mut self.gui_context.piano_roll_toggled, "Piano Roll")
+                        .clicked()
+                    {};
                     if ui
                         .toggle_value(&mut self.gui_context.sound_editor_toggled, "Sound Editor")
                         .clicked()
@@ -714,15 +724,9 @@ impl Game for Website {
                 });
             });
 
-        if self.gui_context.bezier_toggled {
-            egui::Panel::left("bezier panel")
-                .resizable(true)
-                .min_size(300.0)
-                .show_inside(ui, |ui| {
-                    ui.heading("Bezier Editor");
-                    self.gui_context.bezier_editor.ui(ui);
-                });
-        };
+        if self.gui_context.piano_roll_toggled {
+            self.gui_context.piano_roll.ui(dt, engine, ui);
+        }
 
         if self.gui_context.sound_editor_toggled {
             self.gui_context.sound_editor.ui(dt, engine, ui);

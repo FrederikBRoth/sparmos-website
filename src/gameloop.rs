@@ -606,7 +606,7 @@ impl Game for Website {
         self.camera_transition_handler.transition_map = camera_transition;
         self.bad_apple = badapple;
         let keys = [
-            "C4", "C#4", "D4", "D#4", "E4", "F4", "F#4", "G4", "G#4", "A4", "A#4", "B4",
+            "C4", "C#4", "D4", "D#4", "E4", "F4", "F#4", "G4", "G#4", "A4", "A#4", "B4", "C5",
         ];
         const HARMONICS_PIANO_ORGANIC: [f32; 7] = [1.00, 0.30, 0.10, 0.05, 0.10, 0.7, 0.02];
         let sounds = keys
@@ -660,6 +660,18 @@ impl Game for Website {
             (AudioTrigger::GameLogic("7".to_string()), sounds[7].clone()),
             (AudioTrigger::GameLogic("8".to_string()), sounds[8].clone()),
             (AudioTrigger::GameLogic("9".to_string()), sounds[9].clone()),
+            (
+                AudioTrigger::GameLogic("10".to_string()),
+                sounds[10].clone(),
+            ),
+            (
+                AudioTrigger::GameLogic("11".to_string()),
+                sounds[11].clone(),
+            ),
+            (
+                AudioTrigger::GameLogic("12".to_string()),
+                sounds[12].clone(),
+            ),
         ]);
         AudioHandler::init_sounds(state, audio_triggers);
         self.gui_context.sound_editor.handles = [

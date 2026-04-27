@@ -663,14 +663,10 @@ impl Game for Website {
         ]
         .into();
         self.sounds = sounds;
-        let midi = include_bytes!("../rickroll.mid");
-        let midi_parsed = Midi::load_midi(midi);
-        self.gui_context.piano_roll.midis.push(midi_parsed);
-        // self.gui_context.piano_roll.create_track_from_midi(0, 15);
         let wii_midi = include_bytes!("../mii.mid");
         let wii_parsed = Midi::load_midi(wii_midi);
         self.gui_context.piano_roll.midis.push(wii_parsed);
-        self.gui_context.piano_roll.create_track_from_midi(1, 0);
+        self.gui_context.piano_roll.create_track_from_midi(0, 0);
     }
 
     fn resize(&mut self, engine: &mut Engine, world: &mut World) {

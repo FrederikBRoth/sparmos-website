@@ -663,6 +663,10 @@ impl Game for Website {
         ]
         .into();
         self.sounds = sounds;
+        let bad_apple = include_bytes!("../badapple.mid");
+        let bad_apple_parsed = Midi::load_midi(bad_apple);
+        self.gui_context.piano_roll.midis.push(bad_apple_parsed);
+
         let wii_midi = include_bytes!("../mii.mid");
         let wii_parsed = Midi::load_midi(wii_midi);
         self.gui_context.piano_roll.midis.push(wii_parsed);
@@ -719,9 +723,9 @@ impl Game for Website {
 
         if self.gui_context.piano_roll_toggled {
             egui::Window::new("Sound Player")
-                .resizable(false)
-                .min_width(1100.0)
-                .min_height(500.0)
+                .resizable(true)
+                .min_width(200.0)
+                .min_height(50.0)
                 .show(ui, |ui| {
                     self.gui_context.piano_roll.ui(dt, engine, ui);
                 });

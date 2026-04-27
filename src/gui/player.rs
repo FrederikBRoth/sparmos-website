@@ -93,7 +93,7 @@ impl PianoRoll {
 
                 self.keys[index].push(note);
             }
-            self.tempo = midi.tempos[1] as f32;
+            self.tempo = midi.tempos[0] as f32;
             self.ticks_per_quarter = midi.ticks_per_quarter as f32;
             let seconds_per_tick = (self.tempo / 1_000_000.0) / self.ticks_per_quarter;
             self.duration_ticks = midi.length as f32;
@@ -127,18 +127,14 @@ impl PianoRoll {
                             piano_roll_bar_height,
                             self.duration_ticks / SCALE,
                         );
-                        let player_head = match self.audio_state {
+
+                        let ticks_per_second = self.ticks_per_quarter * (1_000_000.0 / self.tempo);
+
+                        let progress = self.sample_time * ticks_per_second;
+                        match self.audio_state {
                             AudioState::Playing => {
                                 let dt_sec = dt.as_secs_f32();
-                                let ticks_per_second =
-                                    self.ticks_per_quarter * (1_000_000.0 / self.tempo);
                                 self.sample_time += dt_sec; // now in seconds
-
-                                let progress = self.sample_time * ticks_per_second;
-                                let x = rect.left() + progress / SCALE;
-
-                                let line_top = egui::pos2(x, rect.top());
-                                let line_bottom = egui::pos2(x, rect.bottom());
 
                                 let view_width = ui.clip_rect().width();
                                 let target_scroll =
@@ -148,34 +144,36 @@ impl PianoRoll {
                                 let lerp_factor = 1.0 - (-smoothing * dt_sec).exp();
 
                                 self.scroll_x += (target_scroll - self.scroll_x) * lerp_factor;
-                                Some((line_top, line_bottom))
                             }
-                            _ => None,
+                            _ => {}
                         };
+
+                        let x = rect.left() + progress / SCALE;
+
+                        let line_top = egui::pos2(x, rect.top());
+                        let line_bottom = egui::pos2(x, rect.bottom());
 
                         let mut to_be_deleted = Vec::new();
                         for (row, bar) in self.keys.iter().enumerate() {
                             for (col, sound) in bar.iter().enumerate() {
-                                if let Some((_, player_head_x)) = player_head {
-                                    let x = player_head_x.x - rect.left();
-                                    if should_play(sound, x) {
-                                        if !self.playing_notes.contains(sound) {
-                                            println!(
-                                                "{:?} layer: {} has started playing!!!",
-                                                sound,
-                                                self.keys.len() - 1 - row + OCTAVE_OFFSET
-                                            );
-                                            engine.get_audio_handler().update_from_gamelogic(
-                                                AudioCommand::ForcePlay(AudioTrigger::gamelogic(
-                                                    &format!(
-                                                        "{}",
-                                                        self.keys.len() - 1 - row + OCTAVE_OFFSET
-                                                    ),
-                                                )),
-                                            );
+                                let head_pos = x - rect.left();
+                                if should_play(sound, head_pos) {
+                                    if !self.playing_notes.contains(sound) {
+                                        println!(
+                                            "{:?} layer: {} has started playing!!!",
+                                            sound,
+                                            self.keys.len() - 1 - row + OCTAVE_OFFSET
+                                        );
+                                        engine.get_audio_handler().update_from_gamelogic(
+                                            AudioCommand::ForcePlay(AudioTrigger::gamelogic(
+                                                &format!(
+                                                    "{}",
+                                                    self.keys.len() - 1 - row + OCTAVE_OFFSET
+                                                ),
+                                            )),
+                                        );
 
-                                            self.playing_notes.insert(sound.clone());
-                                        }
+                                        self.playing_notes.insert(sound.clone());
                                     }
                                 }
                                 let mut r = create_sound_block(row, piano_roll_bar_height, sound);
@@ -242,40 +240,45 @@ impl PianoRoll {
                                 let note = new_note("fucker", 60.0, x, self.keys.len() - 1 - y);
                                 self.keys[y].push(note);
                             }
+                            if response.secondary_clicked() {
+                                let x = pointer_pos.x - rect.left();
+                                self.sample_time = self.get_progress_from_click(x);
+                            }
                         }
 
-                        if let Some((line_top, line_bottom)) = player_head {
-                            painter.line_segment(
-                                [line_top, line_bottom],
-                                egui::Stroke::new(2.0, egui::Color32::GRAY),
-                            );
-                            self.playing_notes.retain(|note| {
-                                if !should_play(note, line_top.x - rect.left()) {
-                                    println!("{:?} is stopped playing :(", note);
-                                    engine.get_audio_handler().update_from_gamelogic(
-                                        AudioCommand::Stop(AudioTrigger::gamelogic(&format!(
-                                            "{}",
-                                            note.key + OCTAVE_OFFSET
-                                        ))),
-                                    );
+                        painter.line_segment(
+                            [line_top, line_bottom],
+                            egui::Stroke::new(2.0, egui::Color32::GRAY),
+                        );
+                        self.playing_notes.retain(|note| {
+                            if !should_play(note, line_top.x - rect.left()) {
+                                println!("{:?} is stopped playing :(", note);
+                                engine.get_audio_handler().update_from_gamelogic(
+                                    AudioCommand::Stop(AudioTrigger::gamelogic(&format!(
+                                        "{}",
+                                        note.key + OCTAVE_OFFSET
+                                    ))),
+                                );
 
-                                    false
-                                } else {
-                                    true
-                                }
-                            });
-                        }
+                                false
+                            } else {
+                                true
+                            }
+                        });
                     });
                 });
             });
 
         if ui.button("Start Track").clicked() {
             self.audio_state = AudioState::Playing;
-            self.sample_time = 0.0;
             self.playing_notes.clear();
+        }
+        if ui.button("Pause Track").clicked() {
+            self.audio_state = AudioState::Stopped;
         }
         if ui.button("Stop Track").clicked() {
             self.audio_state = AudioState::Stopped;
+            self.sample_time = 0.0;
         }
 
         ui.allocate_space(ui.available_size());
@@ -451,6 +454,12 @@ impl PianoRoll {
         }
 
         (rect, sense, painter)
+    }
+    fn get_progress_from_click(&self, click_pos: f32) -> f32 {
+        let pos_ratio = click_pos * SCALE / self.duration_ticks;
+        println!("{}", pos_ratio);
+
+        self.duration_seconds * pos_ratio
     }
 }
 

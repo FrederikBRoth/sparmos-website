@@ -111,161 +111,164 @@ impl PianoRoll {
 
                     self.draw_piano_sidebar(ui, piano_roll_bar_height, engine);
 
-                    let mut scroll_area = egui::ScrollArea::horizontal()
+                    egui::ScrollArea::horizontal()
                         .auto_shrink([false, false])
-                        .max_width(self.duration_ticks / SCALE);
+                        .max_width(self.duration_ticks / SCALE)
+                        .scroll_offset(egui::vec2(self.scroll_x, 0.0))
+                        .show(ui, |ui| {
+                            let (rect, response, painter) = self.draw_piano_roll(
+                                ui,
+                                piano_roll_bar_height,
+                                self.duration_ticks / SCALE,
+                            );
+                            let player_head = match self.audio_state {
+                                AudioState::Playing => {
+                                    let dt_sec = dt.as_secs_f32();
+                                    let ticks_per_second =
+                                        self.ticks_per_quarter * (1_000_000.0 / self.tempo);
+                                    self.sample_time += dt_sec; // now in seconds
 
-                    match self.audio_state {
-                        AudioState::Playing => {
-                            scroll_area = scroll_area.scroll_offset(egui::vec2(self.scroll_x, 0.0))
-                        }
-                        _ => {}
-                    }
-                    scroll_area.show(ui, |ui| {
-                        let (rect, response, painter) = self.draw_piano_roll(
-                            ui,
-                            piano_roll_bar_height,
-                            self.duration_ticks / SCALE,
-                        );
-                        let player_head = match self.audio_state {
-                            AudioState::Playing => {
-                                let dt_sec = dt.as_secs_f32();
-                                let ticks_per_second =
-                                    self.ticks_per_quarter * (1_000_000.0 / self.tempo);
-                                self.sample_time += dt_sec; // now in seconds
+                                    let progress = self.sample_time * ticks_per_second;
+                                    let x = rect.left() + progress / SCALE;
 
-                                let progress = self.sample_time * ticks_per_second;
-                                let x = rect.left() + progress / SCALE;
+                                    // --- smooth scroll ---
+                                    let view_width = ui.clip_rect().width();
+                                    let target_scroll =
+                                        ((progress / SCALE) - view_width * 0.5).max(0.0);
 
-                                let line_top = egui::pos2(x, rect.top());
-                                let line_bottom = egui::pos2(x, rect.bottom());
+                                    let smoothing = 10.0;
+                                    let lerp_factor = 1.0 - (-smoothing * dt_sec).exp();
 
-                                let view_width = ui.clip_rect().width();
-                                let target_scroll =
-                                    ((progress / SCALE) - view_width * 0.5).max(0.0);
+                                    self.scroll_x += (target_scroll - self.scroll_x) * lerp_factor;
 
-                                let smoothing = 10.0;
-                                let lerp_factor = 1.0 - (-smoothing * dt_sec).exp();
+                                    // ----------------------
+                                    let line_top = egui::pos2(x, rect.top());
+                                    let line_bottom = egui::pos2(x, rect.bottom());
 
-                                self.scroll_x += (target_scroll - self.scroll_x) * lerp_factor;
-                                Some((line_top, line_bottom))
-                            }
-                            _ => None,
-                        };
+                                    let playhead_rect =
+                                        egui::Rect::from_min_max(line_top, line_bottom);
+                                    Some((line_top, line_bottom))
+                                }
+                                _ => None,
+                            };
 
-                        let mut to_be_deleted = Vec::new();
-                        for (row, bar) in self.keys.iter().enumerate() {
-                            for (col, sound) in bar.iter().enumerate() {
-                                if let Some((_, player_head_x)) = player_head {
-                                    let x = player_head_x.x - rect.left();
-                                    if should_play(sound, x) {
-                                        if !self.playing_notes.contains(sound) {
-                                            println!(
-                                                "{:?} layer: {} has started playing!!!",
-                                                sound,
-                                                self.keys.len() - 1 - row + OCTAVE_OFFSET
-                                            );
-                                            engine.get_audio_handler().update_from_gamelogic(
-                                                AudioCommand::ForcePlay(AudioTrigger::gamelogic(
-                                                    &format!(
-                                                        "{}",
-                                                        self.keys.len() - 1 - row + OCTAVE_OFFSET
+                            let mut to_be_deleted = Vec::new();
+                            for (row, bar) in self.keys.clone().into_iter().enumerate() {
+                                for (col, sound) in bar.iter().enumerate() {
+                                    if let Some((_, player_head_x)) = player_head {
+                                        let x = player_head_x.x - rect.left();
+                                        if should_play(sound, x) {
+                                            if !self.playing_notes.contains(sound) {
+                                                println!(
+                                                    "{:?} layer: {} has started playing!!!",
+                                                    sound,
+                                                    self.keys.len() - 1 - row + OCTAVE_OFFSET
+                                                );
+                                                engine.get_audio_handler().update_from_gamelogic(
+                                                    AudioCommand::ForcePlay(
+                                                        AudioTrigger::gamelogic(&format!(
+                                                            "{}",
+                                                            self.keys.len() - 1 - row
+                                                                + OCTAVE_OFFSET
+                                                        )),
                                                     ),
-                                                )),
-                                            );
+                                                );
 
-                                            self.playing_notes.insert(sound.clone());
+                                                self.playing_notes.insert(sound.clone());
+                                            }
                                         }
                                     }
-                                }
-                                let mut r = create_sound_block(row, piano_roll_bar_height, sound);
-                                r = r.translate(rect.min.to_vec2());
+                                    let mut r =
+                                        create_sound_block(row, piano_roll_bar_height, sound);
+                                    r = r.translate(rect.min.to_vec2());
 
-                                let mut color = Color32::RED;
-                                if let Some(pointer_pos) = response.interact_pointer_pos() {
-                                    if response.drag_started()
-                                        && r.contains(pointer_pos)
-                                        && ui.rect_contains_pointer(r)
-                                    {
-                                        self.selected = Some((
-                                            row,
-                                            col,
-                                            sound.clone(),
-                                            [pointer_pos.x - r.left(), pointer_pos.y - r.top()]
-                                                .into(),
-                                        ));
-                                        to_be_deleted.push((row, col));
+                                    let mut color = Color32::RED;
+                                    if let Some(pointer_pos) = response.interact_pointer_pos() {
+                                        if response.drag_started()
+                                            && r.contains(pointer_pos)
+                                            && ui.rect_contains_pointer(r)
+                                        {
+                                            self.selected = Some((
+                                                row,
+                                                col,
+                                                sound.clone(),
+                                                [pointer_pos.x - r.left(), pointer_pos.y - r.top()]
+                                                    .into(),
+                                            ));
+                                            to_be_deleted.push((row, col));
+                                        }
+                                    };
+                                    if let Some(pointer_pos) = response.hover_pos() {
+                                        if response.hovered()
+                                            && r.contains(pointer_pos)
+                                            && ui.rect_contains_pointer(r)
+                                        {
+                                            color = Color32::LIGHT_RED;
+                                        }
                                     }
-                                };
-                                if let Some(pointer_pos) = response.hover_pos() {
-                                    if response.hovered()
-                                        && r.contains(pointer_pos)
-                                        && ui.rect_contains_pointer(r)
-                                    {
-                                        color = Color32::LIGHT_RED;
-                                    }
+                                    ui.painter().rect_filled(r, 2.0, color);
                                 }
-                                ui.painter().rect_filled(r, 2.0, color);
                             }
-                        }
 
-                        while let Some((x, y)) = to_be_deleted.pop() {
-                            self.keys[x].remove(y);
-                        }
-
-                        if let Some(pointer_pos) = response.interact_pointer_pos() {
-                            if response.dragged()
-                                && let Some((_, _, note, offset)) = self.selected.as_ref()
-                            {
-                                let mut r = create_sound_block_from_cursor(
-                                    pointer_pos,
-                                    note,
-                                    piano_roll_bar_height,
-                                    offset,
-                                );
-
-                                ui.painter().rect_filled(r, 2.0, Color32::LIGHT_RED);
+                            while let Some((x, y)) = to_be_deleted.pop() {
+                                self.keys[x].remove(y);
                             }
-                            if response.drag_stopped()
-                                && let Some((x, y, note, offset)) = self.selected.as_mut()
-                            {
-                                let y = layer_from_cursor(pointer_pos, rect, piano_roll_bar_height);
-                                note.start = f32_to_u32(pointer_pos.x - rect.left() - offset.x);
-                                note.key = self.keys.len() - 1 - y;
-                                println!("{}", y);
-                                self.keys[y].push(note.clone());
-                                self.selected = None;
-                            }
-                            if response.double_clicked() {
-                                let y = layer_from_cursor(pointer_pos, rect, piano_roll_bar_height);
-                                let x = pointer_pos.x - rect.left();
-                                let note = new_note("fucker", 60.0, x, self.keys.len() - 1 - y);
-                                self.keys[y].push(note);
-                            }
-                        }
 
-                        if let Some((line_top, line_bottom)) = player_head {
-                            painter.line_segment(
-                                [line_top, line_bottom],
-                                egui::Stroke::new(2.0, egui::Color32::GRAY),
-                            );
-                            self.playing_notes.retain(|note| {
-                                if !should_play(note, line_top.x - rect.left()) {
-                                    println!("{:?} is stopped playing :(", note);
-                                    engine.get_audio_handler().update_from_gamelogic(
-                                        AudioCommand::Stop(AudioTrigger::gamelogic(&format!(
-                                            "{}",
-                                            note.key + OCTAVE_OFFSET
-                                        ))),
+                            if let Some(pointer_pos) = response.interact_pointer_pos() {
+                                if response.dragged()
+                                    && let Some((_, _, note, offset)) = self.selected.as_ref()
+                                {
+                                    let mut r = create_sound_block_from_cursor(
+                                        pointer_pos,
+                                        note,
+                                        piano_roll_bar_height,
+                                        offset,
                                     );
 
-                                    false
-                                } else {
-                                    true
+                                    ui.painter().rect_filled(r, 2.0, Color32::LIGHT_RED);
                                 }
-                            });
-                        }
-                    });
+                                if response.drag_stopped()
+                                    && let Some((x, y, note, offset)) = self.selected.as_mut()
+                                {
+                                    let y =
+                                        layer_from_cursor(pointer_pos, rect, piano_roll_bar_height);
+                                    note.start = f32_to_u32(pointer_pos.x - rect.left() - offset.x);
+                                    note.key = self.keys.len() - 1 - y;
+                                    println!("{}", y);
+                                    self.keys[y].push(note.clone());
+                                    self.selected = None;
+                                }
+                                if response.double_clicked() {
+                                    let y =
+                                        layer_from_cursor(pointer_pos, rect, piano_roll_bar_height);
+                                    let x = pointer_pos.x - rect.left();
+                                    let note = new_note("fucker", 60.0, x, self.keys.len() - 1 - y);
+                                    self.keys[y].push(note);
+                                }
+                            }
+
+                            if let Some((line_top, line_bottom)) = player_head {
+                                painter.line_segment(
+                                    [line_top, line_bottom],
+                                    egui::Stroke::new(2.0, egui::Color32::GRAY),
+                                );
+                                self.playing_notes.retain(|note| {
+                                    if !should_play(note, line_top.x - rect.left()) {
+                                        println!("{:?} is stopped playing :(", note);
+                                        engine.get_audio_handler().update_from_gamelogic(
+                                            AudioCommand::Stop(AudioTrigger::gamelogic(&format!(
+                                                "{}",
+                                                note.key + OCTAVE_OFFSET
+                                            ))),
+                                        );
+
+                                        false
+                                    } else {
+                                        true
+                                    }
+                                });
+                            }
+                        });
                 });
             });
 

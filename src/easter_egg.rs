@@ -1,6 +1,6 @@
 use sparmos_engine::{
     cgmath::Vector3,
-    entity::systems::camera::{Camera, CameraSystem},
+    systems::camera::{Camera, CameraSystem},
     winit::dpi::PhysicalSize,
 };
 

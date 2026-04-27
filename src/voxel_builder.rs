@@ -1,8 +1,8 @@
 use cgmath::{MetricSpace, Vector3};
 use dot_vox::load_bytes;
 use sparmos_engine::cgmath::{InnerSpace, Rotation3, Zero, vec3};
-use sparmos_engine::entity::core::instance::Instance;
-use sparmos_engine::helpers::animation::{
+use sparmos_engine::core::instance::Instance;
+use sparmos_engine::systems::animation::{
     AnimationHandler, AnimationStep, Interpolation, StepState,
 };
 use sparmos_engine::{cgmath, log};

@@ -1,16 +1,15 @@
 use std::{fmt, vec};
 
 use sparmos_engine::{
-    cgmath::{Vector2, vec2},
-    egui::{self, Color32, RichText, Ui},
-    entity::{
-        audio::{
-            audio_handler::{AudioCommand, AudioTrigger, hz_to_index, index_to_hz, index_to_key},
-            synth::{AudioState, EnvelopeSegment, Sound, Waveform},
-        },
-        core::engine::Engine,
+    audio::{
+        audio_handler::{AudioCommand, AudioTrigger, hz_to_index, index_to_hz, index_to_key},
+        midi::Midi,
+        synth::{AudioState, EnvelopeSegment, Sound, Waveform},
     },
-    helpers::animation::{Interpolation, castaljau_point},
+    cgmath::{Vector2, vec2},
+    core::engine::Engine,
+    egui::{self, Color32, RichText, Ui},
+    systems::animation::Interpolation,
 };
 
 use crate::gui::player::PianoRoll;

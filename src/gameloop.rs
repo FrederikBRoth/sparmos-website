@@ -5,33 +5,28 @@ use std::{
 
 use sparmos_engine::{
     application::state::{Game, State, map_value},
+    audio::{
+        audio_handler::{AudioCommand, AudioHandler, AudioTrigger, get_full_piano, pianokey_to_hz},
+        midi::Midi,
+        synth::{EnvelopeSegment, Sound, Waveform},
+    },
     cgmath::{self, *},
+    core::{
+        engine::Engine,
+        entities::World,
+        instance::{GpuInstance, Instance, InstanceController},
+        material::MaterialBuilder,
+        post_processing::Effect,
+        render::Renderable,
+    },
     egui::{self, Ui},
-    entity::{
-        audio::{
-            audio_handler::{AudioCommand, AudioHandler, AudioTrigger, pianokey_to_hz},
-            synth::{EnvelopeSegment, Sound, Waveform},
-        },
-        core::{
-            engine::Engine,
-            entities::World,
-            instance::{GpuInstance, Instance, InstanceController},
-            material::MaterialBuilder,
-            post_processing::Effect,
-            render::Renderable,
-        },
-        entities::cube,
-        systems::{
-            camera::{
-                Camera, CameraAnimator, CameraMode, CameraSystem, MovementKey, MovementPress,
-            },
-            light::{Light, LightSystem},
-        },
-    },
-    helpers::animation::{
-        AnimationHandler, AnimationStep, AnimationType, Interpolation, StepState,
-    },
+    entities::cube,
     log,
+    systems::{
+        animation::{AnimationHandler, AnimationStep, AnimationType, Interpolation, StepState},
+        camera::{Camera, CameraAnimator, CameraMode, CameraSystem, MovementKey, MovementPress},
+        light::{Light, LightSystem},
+    },
     winit::{
         self,
         dpi::{PhysicalPosition, PhysicalSize},
@@ -635,7 +630,7 @@ impl Game for Website {
             })
             .collect::<Vec<Sound>>();
 
-        let audio_triggers = HashMap::from([
+        let mut audio_triggers = HashMap::from([
             (AudioTrigger::Keyboard(KeyCode::KeyF), sounds[0].clone()),
             (AudioTrigger::Keyboard(KeyCode::KeyG), sounds[2].clone()),
             (AudioTrigger::Keyboard(KeyCode::KeyH), sounds[4].clone()),
@@ -650,29 +645,11 @@ impl Game for Website {
                 AudioTrigger::GameLogic("test".to_string()),
                 sounds[6].clone(),
             ),
-            (AudioTrigger::GameLogic("0".to_string()), sounds[0].clone()),
-            (AudioTrigger::GameLogic("1".to_string()), sounds[1].clone()),
-            (AudioTrigger::GameLogic("2".to_string()), sounds[2].clone()),
-            (AudioTrigger::GameLogic("3".to_string()), sounds[3].clone()),
-            (AudioTrigger::GameLogic("4".to_string()), sounds[4].clone()),
-            (AudioTrigger::GameLogic("5".to_string()), sounds[5].clone()),
-            (AudioTrigger::GameLogic("6".to_string()), sounds[6].clone()),
-            (AudioTrigger::GameLogic("7".to_string()), sounds[7].clone()),
-            (AudioTrigger::GameLogic("8".to_string()), sounds[8].clone()),
-            (AudioTrigger::GameLogic("9".to_string()), sounds[9].clone()),
-            (
-                AudioTrigger::GameLogic("10".to_string()),
-                sounds[10].clone(),
-            ),
-            (
-                AudioTrigger::GameLogic("11".to_string()),
-                sounds[11].clone(),
-            ),
-            (
-                AudioTrigger::GameLogic("12".to_string()),
-                sounds[12].clone(),
-            ),
         ]);
+        //88 is the standard piano key count
+        for (i, sound) in get_full_piano().iter().enumerate() {
+            audio_triggers.insert(AudioTrigger::GameLogic(i.to_string()), sound.clone());
+        }
         AudioHandler::init_sounds(state, audio_triggers);
         self.gui_context.sound_editor.handles = [
             RatioHandle {
@@ -686,6 +663,14 @@ impl Game for Website {
         ]
         .into();
         self.sounds = sounds;
+        let midi = include_bytes!("../rickroll.mid");
+        let midi_parsed = Midi::load_midi(midi);
+        self.gui_context.piano_roll.midis.push(midi_parsed);
+        // self.gui_context.piano_roll.create_track_from_midi(0, 15);
+        let wii_midi = include_bytes!("../mii.mid");
+        let wii_parsed = Midi::load_midi(wii_midi);
+        self.gui_context.piano_roll.midis.push(wii_parsed);
+        self.gui_context.piano_roll.create_track_from_midi(1, 0);
     }
 
     fn resize(&mut self, engine: &mut Engine, world: &mut World) {
@@ -737,7 +722,13 @@ impl Game for Website {
             });
 
         if self.gui_context.piano_roll_toggled {
-            self.gui_context.piano_roll.ui(dt, engine, ui);
+            egui::Window::new("Sound Player")
+                .resizable(false)
+                .min_width(1100.0)
+                .min_height(500.0)
+                .show(ui, |ui| {
+                    self.gui_context.piano_roll.ui(dt, engine, ui);
+                });
         }
 
         if self.gui_context.sound_editor_toggled {

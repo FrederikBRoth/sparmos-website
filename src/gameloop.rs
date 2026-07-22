@@ -1,10 +1,14 @@
 use std::{
     collections::{BTreeMap, HashMap},
+    ops::Deref,
     vec,
 };
 
 use sparmos_engine::{
-    application::state::{Game, State, map_value},
+    application::{
+        gui_elements::tui::{TuiBorder, TuiPanel, toggleable_tui_button, tui_button},
+        state::{Game, State, map_value},
+    },
     audio::{
         audio_handler::{AudioCommand, AudioHandler, AudioTrigger, get_full_piano, pianokey_to_hz},
         midi::Midi,
@@ -19,7 +23,7 @@ use sparmos_engine::{
         post_processing::Effect,
         render::Renderable,
     },
-    egui::{self, Ui},
+    egui::{self, FontFamily, FontId, TextStyle, Ui},
     entities::cube,
     log,
     systems::{
@@ -402,20 +406,6 @@ impl Game for Website {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_pos = PhysicalPosition::new(position.x as f32, position.y as f32);
-
-                // let test = self.camera_controller.camera.screen_to_world_ray(
-                //     self.cursor_position.x,
-                //     self.cursor_position.y,
-                //     screen.width as f32,
-                //     screen.height as f32,
-                // );
-                // line_trace(&mut self.instance_controller2, camera, &self.queue, &self.device, test);
-
-                // if let Some(controller) = self.chunk_map.get_mut(&target_chunk) {
-                //     if let Some(i) = line_trace(controller, test) {
-                //         controller.remove_instance(i, &self.queue);
-                //     }
-                // }
             }
             #[cfg(not(target_arch = "wasm32"))]
             WindowEvent::MouseWheel { delta, .. } => {
@@ -687,39 +677,73 @@ impl Game for Website {
     fn gui_setup(&mut self, dt: std::time::Duration, engine: &mut Engine, ui: &mut Ui) {
         let mut visuals = egui::Visuals::dark();
 
-        visuals.override_text_color = Some(egui::Color32::from_gray(220));
+        visuals.window_corner_radius = 0.0.into();
+        visuals.menu_corner_radius = 0.0.into();
+        visuals.widgets.noninteractive.corner_radius = 0.0.into();
+        visuals.widgets.inactive.corner_radius = 0.0.into();
+        visuals.widgets.hovered.corner_radius = 0.0.into();
+        visuals.widgets.active.corner_radius = 0.0.into();
 
-        // Panels
-        visuals.panel_fill = egui::Color32::from_rgb(10, 10, 10);
-        visuals.window_fill = egui::Color32::from_rgb(15, 15, 15);
+        visuals.window_shadow = egui::Shadow::NONE;
+        visuals.popup_shadow = egui::Shadow::NONE;
 
-        // Subtle separation instead of borders
-        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(12, 12, 12);
-        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(18, 18, 18);
+        visuals.window_fill = egui::Color32::BLACK;
+        visuals.panel_fill = egui::Color32::BLACK;
+        visuals.extreme_bg_color = egui::Color32::BLACK;
+        visuals.faint_bg_color = egui::Color32::from_gray(15);
 
-        // Remove harsh outlines
-        visuals.widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
-        visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-        visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::GRAY);
+        visuals.widgets.noninteractive.bg_fill = egui::Color32::BLACK;
+        visuals.widgets.inactive.bg_fill = egui::Color32::BLACK;
+        visuals.widgets.hovered.bg_fill = egui::Color32::from_gray(20);
+        visuals.widgets.active.bg_fill = egui::Color32::from_gray(40);
 
-        // Selection (use your red here)
-        visuals.selection.bg_fill = egui::Color32::from_rgb(120, 0, 0);
-
-        ui.set_visuals(visuals);
-        egui::Panel::top("top_panel")
-            .resizable(false)
-            .show_inside(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if ui
-                        .toggle_value(&mut self.gui_context.piano_roll_toggled, "Piano Roll")
-                        .clicked()
-                    {};
-                    if ui
-                        .toggle_value(&mut self.gui_context.sound_editor_toggled, "Sound Editor")
-                        .clicked()
-                    {};
-                });
+        visuals.override_text_color = Some(egui::Color32::LIGHT_GRAY);
+        //
+        // visuals.override_text_color = Some(egui::Color32::from_gray(220));
+        //
+        // // Panels
+        // visuals.panel_fill = egui::Color32::from_rgb(10, 10, 10);
+        // visuals.window_fill = egui::Color32::from_rgb(15, 15, 15);
+        //
+        // // Subtle separation instead of borders
+        // visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(12, 12, 12);
+        // visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(18, 18, 18);
+        //
+        // // Remove harsh outlines
+        // visuals.widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
+        // visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+        // visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::GRAY);
+        //
+        // // Selection (use your red here)
+        // visuals.selection.bg_fill = egui::Color32::from_rgb(120, 0, 0);
+        let mut style = (*ui.style().deref()).clone();
+        style.text_styles = [
+            (TextStyle::Heading, FontId::new(16.0, FontFamily::Monospace)),
+            (TextStyle::Body, FontId::new(16.0, FontFamily::Monospace)),
+            (
+                TextStyle::Monospace,
+                FontId::new(16.0, FontFamily::Monospace),
+            ),
+            (TextStyle::Button, FontId::new(16.0, FontFamily::Monospace)),
+            (TextStyle::Small, FontId::new(16.0, FontFamily::Monospace)),
+        ]
+        .into();
+        ui.ctx().set_style_of(egui::Theme::Dark, style);
+        ui.ctx().set_visuals(visuals);
+        TuiPanel::top(TuiBorder::HardLines).size(1).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if toggleable_tui_button(ui, &mut self.gui_context.piano_roll_toggled, "Piano Roll")
+                    .clicked()
+                {}
+                if toggleable_tui_button(
+                    ui,
+                    &mut self.gui_context.sound_editor_toggled,
+                    "Sound Editor",
+                )
+                .clicked()
+                {}
             });
+        });
 
         if self.gui_context.piano_roll_toggled {
             egui::Window::new("Sound Player")

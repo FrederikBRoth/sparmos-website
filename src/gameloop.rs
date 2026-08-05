@@ -6,7 +6,7 @@ use std::{
 
 use sparmos_engine::{
     application::{
-        gui_elements::tui::{TuiBorder, TuiPanel, toggleable_tui_button, tui_button},
+        gui_elements::tui::{TuiBorder, TuiPanel, TuiWindow, toggleable_tui_button, tui_button},
         state::{Game, State, map_value},
     },
     audio::{
@@ -23,7 +23,7 @@ use sparmos_engine::{
         post_processing::Effect,
         render::Renderable,
     },
-    egui::{self, FontFamily, FontId, TextStyle, Ui},
+    egui::{self, FontFamily, FontId, Id, TextStyle, Ui, pos2, vec2},
     entities::cube,
     log,
     systems::{
@@ -730,29 +730,57 @@ impl Game for Website {
         .into();
         ui.ctx().set_style_of(egui::Theme::Dark, style);
         ui.ctx().set_visuals(visuals);
-        TuiPanel::top(TuiBorder::HardLines).size(1).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if toggleable_tui_button(ui, &mut self.gui_context.piano_roll_toggled, "Piano Roll")
+        // TuiPanel::right(TuiBorder::HardLines)
+        //     .size(ui, 15)
+        //     .show(ui, |ui| {});
+        //
+        TuiPanel::left(TuiBorder::HardLines)
+            .size(ui, 15)
+            .show(ui, |ui| {});
+
+        // TuiPanel::top(TuiBorder::HardLines)
+        //     .size(ui, 15)
+        //     .show(ui, |ui| {});
+        TuiPanel::top(TuiBorder::HardLines)
+            .size(ui, 3)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if toggleable_tui_button(
+                        ui,
+                        &mut self.gui_context.piano_roll_toggled,
+                        "Piano Roll",
+                    )
                     .clicked()
-                {}
-                if toggleable_tui_button(
-                    ui,
-                    &mut self.gui_context.sound_editor_toggled,
-                    "Sound Editor",
-                )
-                .clicked()
-                {}
+                    {}
+                    if toggleable_tui_button(
+                        ui,
+                        &mut self.gui_context.sound_editor_toggled,
+                        "Sound Editor",
+                    )
+                    .clicked()
+                    {}
+                });
             });
-        });
 
         if self.gui_context.piano_roll_toggled {
-            egui::Window::new("Sound Player")
-                .resizable(true)
-                .min_width(200.0)
-                .min_height(50.0)
-                .show(ui, |ui| {
-                    self.gui_context.piano_roll.ui(dt, engine, ui);
-                });
+            TuiWindow::new(
+                Id::new("test"),
+                "Piano Roll of DOOOOM Generic Cardboard Box",
+                pos2(0.0, 0.0),
+                vec2(1000.0, 1000.0),
+                TuiBorder::HardLines,
+            )
+            .show(ui, |ui| {
+                self.gui_context.piano_roll.ui(dt, engine, ui);
+            });
+
+            //         egui::Window::new("Sound Player")
+            // .resizable(true)
+            // .min_width(200.0)
+            // .min_height(50.0)
+            // .show(ui, |ui| {
+            //     self.gui_context.piano_roll.ui(dt, engine, ui);
+            // });
         }
 
         if self.gui_context.sound_editor_toggled {

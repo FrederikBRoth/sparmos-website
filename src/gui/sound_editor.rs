@@ -187,209 +187,206 @@ pub struct SoundEditor {
 
 impl SoundEditor {
     pub fn ui(&mut self, dt: std::time::Duration, engine: &mut Engine, ui: &mut egui::Ui) {
-        egui::Window::new("Sound editor")
-            .resizable(true)
-            .min_width(1000.0)
-            .min_height(500.0)
-            // .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ui, |ui| {
-                let attack = EnvelopeHandle::attack(self.handles[0].ratio, 0.0);
+        let attack = EnvelopeHandle::attack(self.handles[0].ratio, 0.0);
 
-                let decay = EnvelopeHandle::decay(
-                    self.handles[1].ratio - self.handles[0].ratio,
-                    attack.scale,
-                );
-                let refrain =
-                    EnvelopeHandle::release(1.0 - self.handles[1].ratio, self.handles[1].ratio);
+        let decay =
+            EnvelopeHandle::decay(self.handles[1].ratio - self.handles[0].ratio, attack.scale);
+        let refrain = EnvelopeHandle::release(1.0 - self.handles[1].ratio, self.handles[1].ratio);
 
-                let envelopes = EnvelopeContainer {
-                    attack,
-                    decay,
-                    refrain,
-                };
+        let envelopes = EnvelopeContainer {
+            attack,
+            decay,
+            refrain,
+        };
 
-                let mut changed = false;
+        let mut changed = false;
 
-                if let Some(selected_sound) = self.selected_sound
-                    && let Some(sound) = self.sounds.get_mut(selected_sound)
-                {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            let (rect, response) = ui.allocate_exact_size(
-                                [ui.available_size().x - 200.0, 400.0].into(),
-                                egui::Sense::click_and_drag(),
+        if let Some(selected_sound) = self.selected_sound
+            && let Some(sound) = self.sounds.get_mut(selected_sound)
+        {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    let (rect, response) = ui.allocate_exact_size(
+                        [ui.available_size().x - 200.0, 400.0].into(),
+                        egui::Sense::click_and_drag(),
+                    );
+
+                    let painter = ui.painter_at(rect);
+                    painter.rect_filled(rect, 0.0, Color32::BLACK);
+
+                    let to_screen = egui::emath::RectTransform::from_to(
+                        egui::Rect::from_min_max(egui::pos2(0.0, 1.0), egui::pos2(1.0, 0.0)),
+                        rect,
+                    );
+
+                    for handle in self.handles.iter_mut() {
+                        changed |=
+                            drag_handle(&response, &to_screen, &mut self.selected_point, handle);
+
+                        draw_handle(
+                            &to_screen,
+                            &painter,
+                            handle.ratio,
+                            self.selected_point == Some(handle.kind),
+                        );
+                    }
+
+                    //Audio bar tracking
+                    let sample_rate = engine.get_audio_handler().sample_rate;
+
+                    match self.audio_state {
+                        AudioState::Playing => {
+                            let dt_sec = dt.as_secs_f32();
+
+                            self.sample_time += dt_sec * sample_rate;
+
+                            let attack_len = (envelopes.attack.get_length)(sound);
+                            let decay_len = (envelopes.decay.get_length)(sound);
+
+                            let total_len = attack_len + decay_len;
+
+                            let t = self.sample_time / sample_rate;
+
+                            if t >= total_len {
+                                engine.get_audio_handler().update_from_gamelogic(
+                                    AudioCommand::Stop(AudioTrigger::gamelogic(
+                                        "waveform_visualizer_sound",
+                                    )),
+                                );
+                                self.audio_state = AudioState::Stopped;
+                            }
+
+                            let visible_x = if t < attack_len {
+                                let local = t / attack_len; // 0 → 1
+
+                                envelopes.attack.offset + local * envelopes.attack.scale
+                            } else {
+                                let local_time = t - attack_len;
+                                let local = local_time / decay_len; // 0 → 1
+
+                                envelopes.decay.offset + local * envelopes.decay.scale
+                            };
+
+                            let line_top = to_screen.transform_pos(egui::pos2(visible_x, 1.0));
+                            let line_bottom = to_screen.transform_pos(egui::pos2(visible_x, -1.0));
+
+                            painter.line_segment(
+                                [line_top, line_bottom],
+                                egui::Stroke::new(2.0, egui::Color32::GRAY),
+                            );
+                        }
+                        AudioState::Stopping => {
+                            let dt_sec = dt.as_secs_f32();
+                            self.sample_time += dt_sec * sample_rate;
+
+                            let length = (envelopes.refrain.get_length)(sound);
+                            let t = self.sample_time / sample_rate;
+                            let local = t / length;
+
+                            let visible_x =
+                                envelopes.refrain.offset + local * envelopes.refrain.scale;
+
+                            let line_top = to_screen.transform_pos(egui::pos2(visible_x, 1.0));
+                            let line_bottom = to_screen.transform_pos(egui::pos2(visible_x, -1.0));
+
+                            println!("{:?}", visible_x);
+
+                            painter.line_segment(
+                                [line_top, line_bottom],
+                                egui::Stroke::new(2.0, egui::Color32::GRAY),
                             );
 
-                            let painter = ui.painter_at(rect);
-                            painter.rect_filled(rect, 0.0, Color32::BLACK);
+                            if t >= length {
+                                self.audio_state = AudioState::Stopped;
+                            }
+                        }
+                        AudioState::Stopped => {}
+                    }
+                    //Envelope handling
+                    for envelope in envelopes.iter() {
+                        let mut curve_points = Vec::new();
+                        for i in 0..=64 {
+                            let var_name = 64.0;
+                            let t = i as f32 / var_name;
+                            let p = envelope.lerp_envelope(sound, t);
+                            curve_points.push(to_screen.transform_pos(p));
+                        }
 
-                            let to_screen = egui::emath::RectTransform::from_to(
-                                egui::Rect::from_min_max(
-                                    egui::pos2(0.0, 1.0),
-                                    egui::pos2(1.0, 0.0),
-                                ),
-                                rect,
+                        // red offset
+                        painter.add(egui::Shape::line(
+                            curve_points
+                                .iter()
+                                .map(|p| *p + egui::vec2(-1.0, 0.0))
+                                .collect(),
+                            egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 0, 0)),
+                        ));
+
+                        // blue offse
+                        painter.add(egui::Shape::line(
+                            curve_points
+                                .iter()
+                                .map(|p| *p + egui::vec2(1.5, 0.0))
+                                .collect(),
+                            egui::Stroke::new(1.5, egui::Color32::from_rgb(0, 100, 255)),
+                        ));
+
+                        // main white line
+                        painter.add(egui::Shape::line(
+                            curve_points.clone(),
+                            egui::Stroke::new(2.0, egui::Color32::WHITE),
+                        ));
+
+                        curve_points.clear();
+                        if let Some(pointer_pos) = response.hover_pos()
+                            && !response.dragged()
+                        {
+                            let pointer = to_screen.inverse().transform_pos(pointer_pos);
+                            let bounds = envelope.get_bounds();
+                            if pointer.x > bounds.x && pointer.x <= bounds.y {
+                                self.selected_envelope = Some(envelope.kind)
+                            }
+                        }
+                        if let Some(selected) = self.selected_envelope.as_ref()
+                            && envelope.kind == *selected
+                        {
+                            CustomInterpolationEditor::ui(
+                                &painter,
+                                &response,
+                                &to_screen,
+                                envelope,
+                                sound,
+                                &mut self.bezier_editor,
+                                &mut changed,
                             );
+                        }
+                    }
 
-                            for handle in self.handles.iter_mut() {
-                                changed |= drag_handle(
-                                    &response,
-                                    &to_screen,
-                                    &mut self.selected_point,
-                                    handle,
-                                );
+                    ui.allocate_ui([ui.available_size().x - 200.0, 20.0].into(), |ui| {
+                        ui.columns(3, |columns| {
+                            columns[0].horizontal(|ui| {
+                                let attack = (envelopes.attack.get_envelope)(sound);
 
-                                draw_handle(
-                                    &to_screen,
-                                    &painter,
-                                    handle.ratio,
-                                    self.selected_point == Some(handle.kind),
-                                );
-                            }
-
-                            //Audio bar tracking
-                            let sample_rate = engine.get_audio_handler().sample_rate;
-
-                            match self.audio_state {
-                                AudioState::Playing => {
-                                    let dt_sec = dt.as_secs_f32();
-
-                                    self.sample_time += dt_sec * sample_rate;
-
-                                    let attack_len = (envelopes.attack.get_length)(sound);
-                                    let decay_len = (envelopes.decay.get_length)(sound);
-
-                                    let total_len = attack_len + decay_len;
-
-                                    let t = self.sample_time / sample_rate;
-
-                                    if t >= total_len {
-                                        engine.get_audio_handler().update_from_gamelogic(
-                                            AudioCommand::Stop(AudioTrigger::gamelogic(
-                                                "waveform_visualizer_sound",
-                                            )),
-                                        );
-                                        self.audio_state = AudioState::Stopped;
-                                    }
-
-                                    let visible_x = if t < attack_len {
-                                        let local = t / attack_len; // 0 → 1
-
-                                        envelopes.attack.offset + local * envelopes.attack.scale
-                                    } else {
-                                        let local_time = t - attack_len;
-                                        let local = local_time / decay_len; // 0 → 1
-
-                                        envelopes.decay.offset + local * envelopes.decay.scale
-                                    };
-
-                                    let line_top =
-                                        to_screen.transform_pos(egui::pos2(visible_x, 1.0));
-                                    let line_bottom =
-                                        to_screen.transform_pos(egui::pos2(visible_x, -1.0));
-
-                                    painter.line_segment(
-                                        [line_top, line_bottom],
-                                        egui::Stroke::new(2.0, egui::Color32::GRAY),
-                                    );
-                                }
-                                AudioState::Stopping => {
-                                    let dt_sec = dt.as_secs_f32();
-                                    self.sample_time += dt_sec * sample_rate;
-
-                                    let length = (envelopes.refrain.get_length)(sound);
-                                    let t = self.sample_time / sample_rate;
-                                    let local = t / length;
-
-                                    let visible_x =
-                                        envelopes.refrain.offset + local * envelopes.refrain.scale;
-
-                                    let line_top =
-                                        to_screen.transform_pos(egui::pos2(visible_x, 1.0));
-                                    let line_bottom =
-                                        to_screen.transform_pos(egui::pos2(visible_x, -1.0));
-
-                                    println!("{:?}", visible_x);
-
-                                    painter.line_segment(
-                                        [line_top, line_bottom],
-                                        egui::Stroke::new(2.0, egui::Color32::GRAY),
-                                    );
-
-                                    if t >= length {
-                                        self.audio_state = AudioState::Stopped;
-                                    }
-                                }
-                                AudioState::Stopped => {}
-                            }
-                            //Envelope handling
-                            for envelope in envelopes.iter() {
-                                let mut curve_points = Vec::new();
-                                for i in 0..=64 {
-                                    let var_name = 64.0;
-                                    let t = i as f32 / var_name;
-                                    let p = envelope.lerp_envelope(sound, t);
-                                    curve_points.push(to_screen.transform_pos(p));
-                                }
-
-                                // red offset
-                                painter.add(egui::Shape::line(
-                                    curve_points
-                                        .iter()
-                                        .map(|p| *p + egui::vec2(-1.0, 0.0))
-                                        .collect(),
-                                    egui::Stroke::new(1.5, egui::Color32::from_rgb(255, 0, 0)),
-                                ));
-
-                                // blue offse
-                                painter.add(egui::Shape::line(
-                                    curve_points
-                                        .iter()
-                                        .map(|p| *p + egui::vec2(1.5, 0.0))
-                                        .collect(),
-                                    egui::Stroke::new(1.5, egui::Color32::from_rgb(0, 100, 255)),
-                                ));
-
-                                // main white line
-                                painter.add(egui::Shape::line(
-                                    curve_points.clone(),
-                                    egui::Stroke::new(2.0, egui::Color32::WHITE),
-                                ));
-
-                                curve_points.clear();
-                                if let Some(pointer_pos) = response.hover_pos()
-                                    && !response.dragged()
+                                ui.label("Attack Length:");
+                                if ui
+                                    .add(
+                                        egui::DragValue::new(&mut attack.length)
+                                            .range(0..=90)
+                                            .speed(0.01),
+                                    )
+                                    .changed()
                                 {
-                                    let pointer = to_screen.inverse().transform_pos(pointer_pos);
-                                    let bounds = envelope.get_bounds();
-                                    if pointer.x > bounds.x && pointer.x <= bounds.y {
-                                        self.selected_envelope = Some(envelope.kind)
-                                    }
-                                }
-                                if let Some(selected) = self.selected_envelope.as_ref()
-                                    && envelope.kind == *selected
-                                {
-                                    CustomInterpolationEditor::ui(
-                                        &painter,
-                                        &response,
-                                        &to_screen,
-                                        envelope,
-                                        sound,
-                                        &mut self.bezier_editor,
-                                        &mut changed,
-                                    );
-                                }
-                            }
-
-                            ui.allocate_ui([ui.available_size().x - 200.0, 20.0].into(), |ui| {
-                                ui.columns(3, |columns| {
-                                    columns[0].horizontal(|ui| {
-                                        let attack = (envelopes.attack.get_envelope)(sound);
-
-                                        ui.label("Attack Length:");
+                                    changed |= true;
+                                };
+                            });
+                            columns[1].with_layout(
+                                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                                |ui| {
+                                    ui.horizontal(|ui| {
+                                        let decay = (envelopes.decay.get_envelope)(sound);
+                                        ui.label("Decay Length:");
                                         if ui
                                             .add(
-                                                egui::DragValue::new(&mut attack.length)
+                                                egui::DragValue::new(&mut decay.length)
                                                     .range(0..=90)
                                                     .speed(0.01),
                                             )
@@ -397,192 +394,154 @@ impl SoundEditor {
                                         {
                                             changed |= true;
                                         };
-                                    });
-                                    columns[1].with_layout(
-                                        egui::Layout::centered_and_justified(
-                                            egui::Direction::LeftToRight,
-                                        ),
-                                        |ui| {
-                                            ui.horizontal(|ui| {
-                                                let decay = (envelopes.decay.get_envelope)(sound);
-                                                ui.label("Decay Length:");
-                                                if ui
-                                                    .add(
-                                                        egui::DragValue::new(&mut decay.length)
-                                                            .range(0..=90)
-                                                            .speed(0.01),
-                                                    )
-                                                    .changed()
-                                                {
-                                                    changed |= true;
-                                                };
-                                            })
-                                        },
-                                    );
+                                    })
+                                },
+                            );
 
-                                    columns[2].with_layout(
-                                        egui::Layout::right_to_left(egui::Align::Center),
-                                        |ui| {
-                                            ui.horizontal(|ui| {
-                                                let refrain =
-                                                    (envelopes.refrain.get_envelope)(sound);
-                                                if ui
-                                                    .add(
-                                                        egui::DragValue::new(&mut refrain.length)
-                                                            .range(0..=90)
-                                                            .speed(0.01),
-                                                    )
-                                                    .changed()
-                                                {
-                                                    changed |= true;
-                                                };
+                            columns[2].with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.horizontal(|ui| {
+                                        let refrain = (envelopes.refrain.get_envelope)(sound);
+                                        if ui
+                                            .add(
+                                                egui::DragValue::new(&mut refrain.length)
+                                                    .range(0..=90)
+                                                    .speed(0.01),
+                                            )
+                                            .changed()
+                                        {
+                                            changed |= true;
+                                        };
 
-                                                ui.label("Refrain Length:");
-                                            })
-                                        },
-                                    );
-                                });
-                            });
+                                        ui.label("Refrain Length:");
+                                    })
+                                },
+                            );
                         });
-                        egui::ScrollArea::vertical()
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(200.0, ui.available_height() * 3.0),
-                                    egui::Layout::top_down(egui::Align::Min),
-                                    |ui| {
-                                        ui.collapsing("General", |ui| {
-                                            let mut index = hz_to_index(sound.freq);
-                                            if ui
-                                                .add(egui::Slider::new(&mut index, 0..=90))
-                                                .changed()
-                                            {
-                                                sound.freq = index_to_hz(index);
-
-                                                changed |= true;
-                                            };
-
-                                            let key_label = index_to_key(index);
-                                            ui.label(key_label);
-                                        });
-                                        ui.collapsing("Interpolation", |ui| {
-                                            for envelope in envelopes.iter() {
-                                                let interp = (envelope.get_envelope_interp)(sound);
-
-                                                ui.collapsing(
-                                                    format!("{:?}", envelope.kind),
-                                                    |ui| {
-                                                        ui.radio_value(
-                                                            interp,
-                                                            Interpolation::EaseOut,
-                                                            "Ease Out",
-                                                        );
-                                                        ui.radio_value(
-                                                            interp,
-                                                            Interpolation::EaseInEaseOut,
-                                                            "Ease In Ease Out",
-                                                        );
-                                                        ui.radio_value(
-                                                            interp,
-                                                            Interpolation::Linear,
-                                                            "Linear",
-                                                        );
-
-                                                        let starting_points: Vec<egui::Pos2> =
-                                                            match envelope.kind {
-                                                                EnvelopeType::Attack => {
-                                                                    vec![
-                                                                        [0.0, 0.0].into(),
-                                                                        [1.0, 1.0].into(),
-                                                                    ]
-                                                                }
-                                                                EnvelopeType::Refrain
-                                                                | EnvelopeType::Decay => {
-                                                                    vec![
-                                                                        [1.0, 0.0].into(),
-                                                                        [0.0, 1.0].into(),
-                                                                    ]
-                                                                }
-                                                            };
-
-                                                        ui.radio_value(
-                                                            interp,
-                                                            Interpolation::Custom(starting_points),
-                                                            "Custom Bezier",
-                                                        );
-                                                    },
-                                                );
-                                            }
-                                        });
-
-                                        changed |= harmonic_sliders(&mut sound.harmonics, ui);
-                                    },
-                                );
-                            });
                     });
-                    if changed {
-                        sound.phases = sound.harmonics.clone();
-
-                        engine
-                            .get_audio_handler()
-                            .update_from_gamelogic(AudioCommand::Edit(
-                                AudioTrigger::gamelogic("waveform_visualizer_sound"),
-                                sound.clone(),
-                            ));
-                    }
-                };
-                ui.separator();
-
-                ui.horizontal_wrapped(|ui| {
-                    let play_response = ui.button("Play Sound!");
-                    let stop_response = ui.button("Stop Sound!");
-
-                    let new_response = ui.button("New Sound!");
-
-                    if play_response.clicked() {
-                        self.start_sound(engine);
-                    }
-                    if stop_response.clicked() {
-                        self.stop_sound(engine);
-                    }
-                    if new_response.clicked() {
-                        let sound = Sound::new(
-                            [1.0].into(),
-                            440.0,
-                            0.0,
-                            Waveform::SineWave,
-                            EnvelopeSegment {
-                                length: 0.1,
-                                interpolation: Interpolation::EaseInEaseOut,
-                            },
-                            EnvelopeSegment {
-                                length: 1.98,
-                                interpolation: Interpolation::EaseInEaseOut,
-                            },
-                            EnvelopeSegment {
-                                length: 0.1,
-                                ..Default::default()
-                            },
-                        );
-                        self.sounds.push(sound.clone());
-                        self.selected_sound = Some(0);
-                        engine
-                            .get_audio_handler()
-                            .update_from_gamelogic(AudioCommand::Add(
-                                AudioTrigger::gamelogic("waveform_visualizer_sound"),
-                                sound,
-                            ));
-                    }
                 });
-
-                ui.separator();
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        for (i, sound) in self.sounds.iter_mut().enumerate() {
-                            sound_preview(i, &mut self.selected_sound, sound, engine, ui);
-                        }
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(200.0, ui.available_height() * 3.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.collapsing("General", |ui| {
+                                    let mut index = hz_to_index(sound.freq);
+                                    if ui.add(egui::Slider::new(&mut index, 0..=90)).changed() {
+                                        sound.freq = index_to_hz(index);
+
+                                        changed |= true;
+                                    };
+
+                                    let key_label = index_to_key(index);
+                                    ui.label(key_label);
+                                });
+                                ui.collapsing("Interpolation", |ui| {
+                                    for envelope in envelopes.iter() {
+                                        let interp = (envelope.get_envelope_interp)(sound);
+
+                                        ui.collapsing(format!("{:?}", envelope.kind), |ui| {
+                                            ui.radio_value(
+                                                interp,
+                                                Interpolation::EaseOut,
+                                                "Ease Out",
+                                            );
+                                            ui.radio_value(
+                                                interp,
+                                                Interpolation::EaseInEaseOut,
+                                                "Ease In Ease Out",
+                                            );
+                                            ui.radio_value(interp, Interpolation::Linear, "Linear");
+
+                                            let starting_points: Vec<egui::Pos2> =
+                                                match envelope.kind {
+                                                    EnvelopeType::Attack => {
+                                                        vec![[0.0, 0.0].into(), [1.0, 1.0].into()]
+                                                    }
+                                                    EnvelopeType::Refrain | EnvelopeType::Decay => {
+                                                        vec![[1.0, 0.0].into(), [0.0, 1.0].into()]
+                                                    }
+                                                };
+
+                                            ui.radio_value(
+                                                interp,
+                                                Interpolation::Custom(starting_points),
+                                                "Custom Bezier",
+                                            );
+                                        });
+                                    }
+                                });
+
+                                changed |= harmonic_sliders(&mut sound.harmonics, ui);
+                            },
+                        );
                     });
+            });
+            if changed {
+                sound.phases = sound.harmonics.clone();
+
+                engine
+                    .get_audio_handler()
+                    .update_from_gamelogic(AudioCommand::Edit(
+                        AudioTrigger::gamelogic("waveform_visualizer_sound"),
+                        sound.clone(),
+                    ));
+            }
+        };
+        ui.separator();
+
+        ui.horizontal_wrapped(|ui| {
+            let play_response = ui.button("Play Sound!");
+            let stop_response = ui.button("Stop Sound!");
+
+            let new_response = ui.button("New Sound!");
+
+            if play_response.clicked() {
+                self.start_sound(engine);
+            }
+            if stop_response.clicked() {
+                self.stop_sound(engine);
+            }
+            if new_response.clicked() {
+                let sound = Sound::new(
+                    [1.0].into(),
+                    440.0,
+                    0.0,
+                    Waveform::SineWave,
+                    EnvelopeSegment {
+                        length: 0.1,
+                        interpolation: Interpolation::EaseInEaseOut,
+                    },
+                    EnvelopeSegment {
+                        length: 1.98,
+                        interpolation: Interpolation::EaseInEaseOut,
+                    },
+                    EnvelopeSegment {
+                        length: 0.1,
+                        ..Default::default()
+                    },
+                );
+                self.sounds.push(sound.clone());
+                self.selected_sound = Some(0);
+                engine
+                    .get_audio_handler()
+                    .update_from_gamelogic(AudioCommand::Add(
+                        AudioTrigger::gamelogic("waveform_visualizer_sound"),
+                        sound,
+                    ));
+            }
+        });
+
+        ui.separator();
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for (i, sound) in self.sounds.iter_mut().enumerate() {
+                    sound_preview(i, &mut self.selected_sound, sound, engine, ui);
+                }
             });
     }
 

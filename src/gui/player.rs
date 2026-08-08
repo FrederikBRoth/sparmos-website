@@ -1,17 +1,15 @@
 use std::{collections::HashSet, vec};
 
-use dot_vox::Color;
+use sparmos_engine::application::gui_elements::tui::tui_button;
+use sparmos_engine::egui::pos2;
 use sparmos_engine::{
     audio::{
         audio_handler::{AudioCommand, AudioTrigger},
         midi::{Midi, MidiNote},
-        synth::{AudioState, Sound},
+        synth::AudioState,
     },
-    core::engine::{self, Engine},
-    egui::{
-        self, Align2, Color32, FontId, Frame, Id, Painter, Rect, Response, Sense, TextStyle, Ui,
-        emath::OrderedFloat, pos2,
-    },
+    core::engine::Engine,
+    egui::{self, Align2, Color32, FontId, Painter, Rect, Response, Sense, Ui},
 };
 pub const OCTAVES: usize = 7;
 pub const OCTAVE_OFFSET: usize = 3;
@@ -269,14 +267,14 @@ impl PianoRoll {
                 });
             });
 
-        if ui.button("Start Track").clicked() {
+        if tui_button(ui, "Start Track").clicked() {
             self.audio_state = AudioState::Playing;
             self.playing_notes.clear();
         }
-        if ui.button("Pause Track").clicked() {
+        if tui_button(ui, "Pause Track").clicked() {
             self.audio_state = AudioState::Stopped;
         }
-        if ui.button("Stop Track").clicked() {
+        if tui_button(ui, "Stop Track").clicked() {
             self.audio_state = AudioState::Stopped;
             self.sample_time = 0.0;
         }

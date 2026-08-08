@@ -16,12 +16,14 @@ use sparmos_engine::{
     },
     cgmath::{self, *},
     core::{
+        buffer::{Buffer, BufferType, StorageParameters},
+        compute::{Compute, ComputeObject},
         engine::Engine,
         entities::World,
         instance::{GpuInstance, Instance, InstanceController},
         material::MaterialBuilder,
         post_processing::Effect,
-        render::Renderable,
+        render::{ComputeHandle, Renderable},
     },
     egui::{self, FontFamily, FontId, Id, TextStyle, Ui, pos2, vec2},
     entities::cube,
@@ -31,6 +33,7 @@ use sparmos_engine::{
         camera::{Camera, CameraAnimator, CameraMode, CameraSystem, MovementKey, MovementPress},
         light::{Light, LightSystem},
     },
+    wgpu::{BufferUsages, ShaderStages},
     winit::{
         self,
         dpi::{PhysicalPosition, PhysicalSize},
@@ -466,6 +469,9 @@ impl Game for Website {
             .render_context
             .add_shader("boxes", include_str!("shaders/boxes.wgsl"));
 
+        engine
+            .render_context
+            .add_shader("compute", include_str!("shaders/compute.wgsl"));
         //Initiate meshes
         let cube_mesh = cube::new().make_mb(&mut engine.render_context);
 
@@ -507,7 +513,38 @@ impl Game for Website {
         };
 
         world.add_entity((box_entity, markers::Boxes, animation_handler));
-        // }
+
+        let test = [2, 5, 1, 2, 3, 4, 6, 8];
+
+        let input_buffer = Buffer::new(
+            &test,
+            &engine.render_context.device,
+            BufferType::StorageBuffer(StorageParameters {
+                shader_stages: ShaderStages::COMPUTE,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                ..Default::default()
+            }),
+        );
+
+        let output_buffer = Buffer::new(
+            &test,
+            &engine.render_context.device,
+            BufferType::StorageBuffer(StorageParameters {
+                shader_stages: ShaderStages::COMPUTE,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                init: false,
+                read_only: false,
+            }),
+        );
+
+        let compute = Compute::new(
+            &mut engine.render_context,
+            input_buffer,
+            output_buffer,
+            "compute",
+        );
+
+        world.add_entity((test, compute));
 
         let castle = include_bytes!("../castle.vox");
         let chr_knight = include_bytes!("../chr_knight.vox");
@@ -698,24 +735,6 @@ impl Game for Website {
         visuals.widgets.active.bg_fill = egui::Color32::from_gray(40);
 
         visuals.override_text_color = Some(egui::Color32::LIGHT_GRAY);
-        //
-        // visuals.override_text_color = Some(egui::Color32::from_gray(220));
-        //
-        // // Panels
-        // visuals.panel_fill = egui::Color32::from_rgb(10, 10, 10);
-        // visuals.window_fill = egui::Color32::from_rgb(15, 15, 15);
-        //
-        // // Subtle separation instead of borders
-        // visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(12, 12, 12);
-        // visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(18, 18, 18);
-        //
-        // // Remove harsh outlines
-        // visuals.widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
-        // visuals.widgets.inactive.bg_stroke = egui::Stroke::NONE;
-        // visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, egui::Color32::GRAY);
-        //
-        // // Selection (use your red here)
-        // visuals.selection.bg_fill = egui::Color32::from_rgb(120, 0, 0);
         let mut style = (*ui.style().deref()).clone();
         style.text_styles = [
             (TextStyle::Heading, FontId::new(16.0, FontFamily::Monospace)),
@@ -730,19 +749,8 @@ impl Game for Website {
         .into();
         ui.ctx().set_style_of(egui::Theme::Dark, style);
         ui.ctx().set_visuals(visuals);
-        // TuiPanel::right(TuiBorder::HardLines)
-        //     .size(ui, 15)
-        //     .show(ui, |ui| {});
-        //
-        TuiPanel::left(TuiBorder::HardLines)
-            .size(ui, 15)
-            .show(ui, |ui| {});
-
-        // TuiPanel::top(TuiBorder::HardLines)
-        //     .size(ui, 15)
-        //     .show(ui, |ui| {});
         TuiPanel::top(TuiBorder::HardLines)
-            .size(ui, 3)
+            .size(ui, 1)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     if toggleable_tui_button(
@@ -764,10 +772,10 @@ impl Game for Website {
 
         if self.gui_context.piano_roll_toggled {
             TuiWindow::new(
-                Id::new("test"),
-                "Piano Roll of DOOOOM Generic Cardboard Box",
-                pos2(0.0, 0.0),
-                vec2(1000.0, 1000.0),
+                Id::new("piano roll"),
+                "Piano Roll",
+                pos2(100.0, 200.0),
+                vec2(800.0, 600.0),
                 TuiBorder::HardLines,
             )
             .show(ui, |ui| {
@@ -784,7 +792,16 @@ impl Game for Website {
         }
 
         if self.gui_context.sound_editor_toggled {
-            self.gui_context.sound_editor.ui(dt, engine, ui);
+            TuiWindow::new(
+                Id::new("sound editor"),
+                "Sound Editor",
+                pos2(100.0, 200.0),
+                vec2(800.0, 600.0),
+                TuiBorder::HardLines,
+            )
+            .show(ui, |ui| {
+                self.gui_context.sound_editor.ui(dt, engine, ui);
+            });
         }
     }
 }

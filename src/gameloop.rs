@@ -514,7 +514,7 @@ impl Game for Website {
 
         world.add_entity((box_entity, markers::Boxes, animation_handler));
 
-        let test = [2, 5, 1, 2, 3, 4, 6, 8];
+        let test: [u32; 8] = [2, 5, 1, 2, 3, 4, 6, 8];
 
         let input_buffer = Buffer::new(
             &test,
@@ -542,6 +542,7 @@ impl Game for Website {
             input_buffer,
             output_buffer,
             "compute",
+            test.len(),
         );
 
         world.add_entity((test, compute));

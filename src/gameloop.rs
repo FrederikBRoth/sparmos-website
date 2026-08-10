@@ -17,7 +17,6 @@ use sparmos_engine::{
     cgmath::{self, *},
     core::{
         buffer::{Buffer, BufferType, StorageParameters},
-        compute::{Compute, ComputeObject},
         engine::Engine,
         entities::World,
         instance::{GpuInstance, Instance, InstanceController},
@@ -31,6 +30,7 @@ use sparmos_engine::{
     systems::{
         animation::{AnimationHandler, AnimationStep, AnimationType, Interpolation, StepState},
         camera::{Camera, CameraAnimator, CameraMode, CameraSystem, MovementKey, MovementPress},
+        compute::{Compute, ComputeSystem},
         light::{Light, LightSystem},
     },
     wgpu::{BufferUsages, ShaderStages},
@@ -472,6 +472,10 @@ impl Game for Website {
         engine
             .render_context
             .add_shader("compute", include_str!("shaders/compute.wgsl"));
+        engine
+            .render_context
+            .add_shader("compute2", include_str!("shaders/compute2.wgsl"));
+
         //Initiate meshes
         let cube_mesh = cube::new().make_mb(&mut engine.render_context);
 
@@ -537,7 +541,8 @@ impl Game for Website {
             }),
         );
 
-        let compute = Compute::new(
+        let mut cs = ComputeSystem::new();
+        let compute = cs.add(
             &mut engine.render_context,
             input_buffer,
             output_buffer,
@@ -545,8 +550,39 @@ impl Game for Website {
             test.len(),
         );
 
-        world.add_entity((test, compute));
+        let input_buffer2 = Buffer::new(
+            &test,
+            &engine.render_context.device,
+            BufferType::StorageBuffer(StorageParameters {
+                shader_stages: ShaderStages::COMPUTE,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                ..Default::default()
+            }),
+        );
 
+        let output_buffer2 = Buffer::new(
+            &test,
+            &engine.render_context.device,
+            BufferType::StorageBuffer(StorageParameters {
+                shader_stages: ShaderStages::COMPUTE,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                init: false,
+                read_only: false,
+            }),
+        );
+
+        let compute2 = cs.add(
+            &mut engine.render_context,
+            input_buffer2,
+            output_buffer2,
+            "compute2",
+            test.len(),
+        );
+        world.add_system(cs);
+
+        world.add_entity((compute,));
+
+        world.add_entity((compute2,));
         let castle = include_bytes!("../castle.vox");
         let chr_knight = include_bytes!("../chr_knight.vox");
         let rust_logo = include_bytes!("../rust.vox");

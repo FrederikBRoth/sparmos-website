@@ -3,7 +3,6 @@ use std::{fmt, vec};
 use sparmos_engine::{
     audio::{
         audio_handler::{AudioCommand, AudioTrigger, hz_to_index, index_to_hz, index_to_key},
-        midi::Midi,
         synth::{AudioState, EnvelopeSegment, Sound, Waveform},
     },
     cgmath::{Vector2, vec2},

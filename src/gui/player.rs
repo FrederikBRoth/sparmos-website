@@ -1,7 +1,6 @@
 use std::{collections::HashSet, vec};
 
 use sparmos_engine::application::gui_elements::tui::tui_button;
-use sparmos_engine::egui::pos2;
 use sparmos_engine::{
     audio::{
         audio_handler::{AudioCommand, AudioTrigger},
@@ -213,7 +212,7 @@ impl PianoRoll {
                             if response.dragged()
                                 && let Some((_, _, note, offset)) = self.selected.as_ref()
                             {
-                                let mut r = create_sound_block_from_cursor(
+                                let r = create_sound_block_from_cursor(
                                     pointer_pos,
                                     note,
                                     piano_roll_bar_height,
@@ -223,7 +222,7 @@ impl PianoRoll {
                                 ui.painter().rect_filled(r, 2.0, Color32::LIGHT_RED);
                             }
                             if response.drag_stopped()
-                                && let Some((x, y, note, offset)) = self.selected.as_mut()
+                                && let Some((_, _, note, offset)) = self.selected.as_mut()
                             {
                                 let y = layer_from_cursor(pointer_pos, rect, piano_roll_bar_height);
                                 note.start = f32_to_u32(pointer_pos.x - rect.left() - offset.x);

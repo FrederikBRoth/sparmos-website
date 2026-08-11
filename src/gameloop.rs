@@ -6,7 +6,7 @@ use std::{
 
 use sparmos_engine::{
     application::{
-        gui_elements::tui::{TuiBorder, TuiPanel, TuiWindow, toggleable_tui_button, tui_button},
+        gui_elements::tui::{TuiBorder, TuiPanel, TuiWindow, toggleable_tui_button},
         state::{Game, State, map_value},
     },
     audio::{
@@ -16,13 +16,12 @@ use sparmos_engine::{
     },
     cgmath::{self, *},
     core::{
-        buffer::{Buffer, BufferType, StorageParameters},
         engine::Engine,
         entities::World,
         instance::{GpuInstance, Instance, InstanceController},
         material::MaterialBuilder,
         post_processing::Effect,
-        render::{ComputeHandle, Renderable},
+        render::Renderable,
     },
     egui::{self, FontFamily, FontId, Id, TextStyle, Ui, pos2, vec2},
     entities::cube,
@@ -30,10 +29,9 @@ use sparmos_engine::{
     systems::{
         animation::{AnimationHandler, AnimationStep, AnimationType, Interpolation, StepState},
         camera::{Camera, CameraAnimator, CameraMode, CameraSystem, MovementKey, MovementPress},
-        compute::{Compute, ComputeSystem},
+        compute::{ComputeBuilder, ComputeSystem},
         light::{Light, LightSystem},
     },
-    wgpu::{BufferUsages, ShaderStages},
     winit::{
         self,
         dpi::{PhysicalPosition, PhysicalSize},
@@ -45,7 +43,7 @@ use sparmos_engine::{
 use crate::{
     circular_buffer::CircularBuffer,
     easter_egg::EasterEgg,
-    gui::sound_editor::{GuiState, Ratio, RatioHandle, SoundEditor},
+    gui::sound_editor::{GuiState, Ratio, RatioHandle},
     markers::{self},
     transition::{CameraPositions, TransitionHandler},
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
@@ -96,7 +94,7 @@ impl Game for Website {
 
         if buffer_string == "badapple" && !self.bad_apple.toggle {
             world.query_first_with_resources::<&mut Camera>(|resource, camera| {
-                let camera_system = resource.get_system_mut::<CameraSystem>();
+                let camera_system = resource.get_system_mut::<CameraSystem>().unwrap();
                 camera_system.set(MovementKey::RotateLeft, MovementPress::Override);
                 camera.set_camera_mode(CameraMode::AnimatedMode);
                 self.bad_apple.init_camera(camera);
@@ -116,7 +114,7 @@ impl Game for Website {
         }
         if buffer_string == "ihatefun" && self.bad_apple.toggle {
             world.query_first_with_resources::<&mut Camera>(|resource, camera| {
-                let camera_system = resource.get_system_mut::<CameraSystem>();
+                let camera_system = resource.get_system_mut::<CameraSystem>().unwrap();
                 camera_system.set(MovementKey::RotateLeft, MovementPress::NotPressed);
                 camera.set_camera_mode(CameraMode::FreeMode);
                 self.bad_apple.reset_camera(camera_system);
@@ -212,7 +210,7 @@ impl Game for Website {
                 });
                 world.query_first_with_resources::<&mut Camera>(|resource, camera| {
                     log::warn!("{:?}", camera.eye.z);
-                    let camera_system = resource.get_system_mut::<CameraSystem>();
+                    let camera_system = resource.get_system_mut::<CameraSystem>().unwrap();
                     self.bad_apple.update_camera(camera_system, camera)
                 });
 
@@ -425,7 +423,7 @@ impl Game for Website {
             _ => (),
         }
         world.query_first_with_resources::<&mut Camera>(|resources, camera| {
-            let camera_system = resources.get_system_mut::<CameraSystem>();
+            let camera_system = resources.get_system_mut::<CameraSystem>().unwrap();
             camera_system.process_events(event, camera);
         });
     }
@@ -487,8 +485,14 @@ impl Game for Website {
             &mut engine.render_context,
         );
         let light_mat = MaterialBuilder::new()
-            .add_layout("camera", world.resources.get_system::<CameraSystem>())
-            .add_layout("light", world.resources.get_system::<LightSystem>())
+            .add_layout(
+                "camera",
+                world.resources.get_system::<CameraSystem>().unwrap(),
+            )
+            .add_layout(
+                "light",
+                world.resources.get_system::<LightSystem>().unwrap(),
+            )
             .add_shader("lights")
             .build(&cube_mesh, &light_ic, &mut engine.render_context);
 
@@ -506,8 +510,14 @@ impl Game for Website {
         let box_ic = InstanceController::<GpuInstance>::new(instances, &mut engine.render_context);
 
         let box_mat = MaterialBuilder::new()
-            .add_layout("camera", world.resources.get_system::<CameraSystem>())
-            .add_layout("light", world.resources.get_system::<LightSystem>())
+            .add_layout(
+                "camera",
+                world.resources.get_system::<CameraSystem>().unwrap(),
+            )
+            .add_layout(
+                "light",
+                world.resources.get_system::<LightSystem>().unwrap(),
+            )
             .add_shader("boxes")
             .build(&cube_mesh, &box_ic, &mut engine.render_context);
         let box_entity = Renderable {
@@ -520,69 +530,17 @@ impl Game for Website {
 
         let test: [u32; 8] = [2, 5, 1, 2, 3, 4, 6, 8];
 
-        let input_buffer = Buffer::new(
-            &test,
-            &engine.render_context.device,
-            BufferType::StorageBuffer(StorageParameters {
-                shader_stages: ShaderStages::COMPUTE,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-                ..Default::default()
-            }),
-        );
-
-        let output_buffer = Buffer::new(
-            &test,
-            &engine.render_context.device,
-            BufferType::StorageBuffer(StorageParameters {
-                shader_stages: ShaderStages::COMPUTE,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-                init: false,
-                read_only: false,
-            }),
-        );
+        let compute = ComputeBuilder::new(test.len())
+            .add_input_buffer(&test, &engine.render_context.device)
+            .build::<u32>(&mut engine.render_context, "compute");
 
         let mut cs = ComputeSystem::new();
-        let compute = cs.add(
-            &mut engine.render_context,
-            input_buffer,
-            output_buffer,
-            "compute",
-            test.len(),
-        );
+        let compute = cs.add(compute);
 
-        let input_buffer2 = Buffer::new(
-            &test,
-            &engine.render_context.device,
-            BufferType::StorageBuffer(StorageParameters {
-                shader_stages: ShaderStages::COMPUTE,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-                ..Default::default()
-            }),
-        );
-
-        let output_buffer2 = Buffer::new(
-            &test,
-            &engine.render_context.device,
-            BufferType::StorageBuffer(StorageParameters {
-                shader_stages: ShaderStages::COMPUTE,
-                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
-                init: false,
-                read_only: false,
-            }),
-        );
-
-        let compute2 = cs.add(
-            &mut engine.render_context,
-            input_buffer2,
-            output_buffer2,
-            "compute2",
-            test.len(),
-        );
         world.add_system(cs);
 
         world.add_entity((compute,));
 
-        world.add_entity((compute2,));
         let castle = include_bytes!("../castle.vox");
         let chr_knight = include_bytes!("../chr_knight.vox");
         let rust_logo = include_bytes!("../rust.vox");

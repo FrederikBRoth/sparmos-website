@@ -48,7 +48,7 @@ impl AppLifecycle<WasmEvent> for EventContainer {
         }
     }
 
-    fn on_resumed(&mut self, proxy: &winit::event_loop::EventLoopProxy<UserEvent<WasmEvent>>) {
+    fn on_resumed(&mut self, _proxy: &winit::event_loop::EventLoopProxy<UserEvent<WasmEvent>>) {
         #[cfg(target_arch = "wasm32")]
         {
             use sparmos_engine::wgpu;
@@ -58,7 +58,7 @@ impl AppLifecycle<WasmEvent> for EventContainer {
             let window_clone = window.clone();
 
             // Scroll listener
-            let scroll_proxy = proxy.clone();
+            let scroll_proxy = _proxy.clone();
             let scroll_closure =
                 Closure::<dyn FnMut(_)>::new(move |_event: wgpu::web_sys::Event| {
                     let x = window_clone.scroll_x().unwrap_or(0.0);

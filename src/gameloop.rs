@@ -18,7 +18,8 @@ use sparmos_engine::{
     core::{
         engine::Engine,
         entities::World,
-        instance::{GpuInstance, Instance, InstanceController},
+        geometry::Primitive,
+        instance::{GpuInstance, Instance, InstanceController, InstanceToRaw},
         material::MaterialBuilder,
         post_processing::Effect,
         render::Renderable,
@@ -298,7 +299,7 @@ impl Game for Website {
                             true,
                             1.0,
                         );
-                        engine.change_shader(&render.material_handle, "boxes");
+                        engine.change_shader(&render.material_handle, "lights");
                         println!("snake!l!");
                         engine
                             .audio_handler
@@ -485,16 +486,8 @@ impl Game for Website {
             &mut engine.render_context,
         );
         let light_mat = MaterialBuilder::new()
-            .add_layout(
-                "camera",
-                world.resources.get_system::<CameraSystem>().unwrap(),
-            )
-            .add_layout(
-                "light",
-                world.resources.get_system::<LightSystem>().unwrap(),
-            )
             .add_shader("lights")
-            .build(&cube_mesh, &light_ic, &mut engine.render_context);
+            .build::<Primitive, GpuInstance>(&world.resources, &mut engine.render_context);
 
         let light_entity = Renderable {
             material_handle: light_mat,
@@ -510,16 +503,8 @@ impl Game for Website {
         let box_ic = InstanceController::<GpuInstance>::new(instances, &mut engine.render_context);
 
         let box_mat = MaterialBuilder::new()
-            .add_layout(
-                "camera",
-                world.resources.get_system::<CameraSystem>().unwrap(),
-            )
-            .add_layout(
-                "light",
-                world.resources.get_system::<LightSystem>().unwrap(),
-            )
             .add_shader("boxes")
-            .build(&cube_mesh, &box_ic, &mut engine.render_context);
+            .build::<Primitive, GpuInstance>(&world.resources, &mut engine.render_context);
         let box_entity = Renderable {
             material_handle: box_mat,
             instance_controller_handle: box_ic,
@@ -540,6 +525,8 @@ impl Game for Website {
         world.add_system(cs);
 
         world.add_entity((compute,));
+
+        println!("{}", engine.render_context.gpu_objects.materials.len());
 
         let castle = include_bytes!("../castle.vox");
         let chr_knight = include_bytes!("../chr_knight.vox");

@@ -18,11 +18,11 @@ use sparmos_engine::{
     core::{
         engine::Engine,
         entities::World,
-        geometry::Primitive,
+        geometry::{Model, Primitive, Textured},
         instance::{GpuInstance, Instance, InstanceController, InstanceToRaw},
         material::MaterialBuilder,
         post_processing::Effect,
-        render::Renderable,
+        render::{InstanceControllerHandle, Renderable, RenderableFuck},
     },
     egui::{self, FontFamily, FontId, Id, TextStyle, Ui, pos2, vec2},
     entities::cube,
@@ -475,6 +475,9 @@ impl Game for Website {
             .render_context
             .add_shader("compute2", include_str!("shaders/compute2.wgsl"));
 
+        engine
+            .render_context
+            .add_shader("textured", include_str!("shaders/textured.wgsl"));
         //Initiate meshes
         let cube_mesh = cube::new().make_mb(&mut engine.render_context);
 
@@ -525,6 +528,47 @@ impl Game for Website {
         world.add_system(cs);
 
         world.add_entity((compute,));
+
+        let datboi_obj = include_bytes!("../DATBOI.obj");
+        let datboi_mtl = include_bytes!("../DATBOI.mtl");
+
+        let model_ic = InstanceController::<GpuInstance>::new(
+            vec![Instance::new([2.0, 2.0, 1.0].into(), 100.0)],
+            &mut engine.render_context,
+        );
+
+        let model_mat = MaterialBuilder::new()
+            .add_shader("textured")
+            .build::<Textured, GpuInstance>(&world.resources, &mut engine.render_context);
+        let model = Model::load_obj(
+            datboi_obj,
+            Some(datboi_mtl),
+            &mut engine.render_context,
+            model_mat.clone(),
+            model_ic.clone(),
+        )
+        .unwrap();
+
+        // let box_entity1 = RenderableFuck {
+        //     material_handle: model.material,
+        //     instance_controller_handle: model.instance,
+        //     mesh_handle: model.meshes.get(1).unwrap().0.clone(),
+        // };
+        let box_entity2 = Renderable {
+            material_handle: model_mat,
+            instance_controller_handle: model_ic,
+            mesh_handle: cube_mesh,
+        };
+        world.add_entity((model,));
+
+        // world.add_entity((box_entity2,));
+
+        //
+        // world.add_entity((box_entity1,));
+        // world.add_entity((box_entity2,));
+        // world.add_entity((box_entity3,));
+        // world.add_entity((box_entity4,));
+        // world.add_entity((box_entity5,));
 
         println!("{}", engine.render_context.gpu_objects.materials.len());
 

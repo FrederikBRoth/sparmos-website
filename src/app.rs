@@ -21,6 +21,7 @@ impl AppLifecycle<WasmEvent> for EventContainer {
         match event {
             WasmEvent::ScrollPosition { x, y } => {
                 state
+                    .graphics
                     .engine
                     .arguments
                     .args
@@ -29,11 +30,12 @@ impl AppLifecycle<WasmEvent> for EventContainer {
                 log::warn!("scroll x: {}, y: {}", x, y);
             }
             WasmEvent::KeyboardButton { keypress } => {
-                if state.engine.audio_triggers.is_some() {
-                    state.engine.init_sound(0.6, 1.2);
+                if state.graphics.engine.audio_triggers.is_some() {
+                    state.graphics.engine.init_sound(0.6, 1.2);
                 }
 
                 let buffer = state
+                    .graphics
                     .engine
                     .arguments
                     .args
@@ -75,7 +77,7 @@ impl AppLifecycle<WasmEvent> for EventContainer {
             scroll_closure.forget();
 
             // Keyboard listener
-            let key_proxy = proxy.clone();
+            let key_proxy = _proxy.clone();
             let key_closure = Closure::<dyn FnMut(_)>::new(move |event: wgpu::web_sys::Event| {
                 use web_sys::KeyboardEvent;
 

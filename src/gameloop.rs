@@ -19,10 +19,9 @@ use sparmos_engine::{
         engine::Engine,
         entities::World,
         geometry::{Model, Primitive, Textured},
-        instance::{GpuInstance, Instance, InstanceController, InstanceToRaw},
-        material::MaterialBuilder,
+        instance::{GpuInstance, Instance, InstanceController},
         post_processing::Effect,
-        render::{InstanceControllerHandle, Renderable, RenderableFuck},
+        render::Renderable,
     },
     egui::{self, FontFamily, FontId, Id, TextStyle, Ui, pos2, vec2},
     entities::cube,
@@ -430,20 +429,20 @@ impl Game for Website {
     }
 
     fn setup(&mut self, state: &mut State) {
-        let engine = &mut state.engine;
-        let world = &mut state.world;
+        let gfx = &mut state.graphics;
         //Initiates Camera system
         let camera = Camera::new(PhysicalSize::new(
             state.size.width as f32,
             state.size.height as f32,
         ));
-        let camera_system = CameraSystem::new(75.0, 50.0, &engine.render_context.device, &camera);
+        let camera_system =
+            CameraSystem::new(75.0, 50.0, &gfx.engine.render_context.device, &camera);
 
         let camera_animater = CameraAnimator::new(0.75, camera.eye, camera.target);
 
         let camera_speed = camera_system.speed;
-        world.add_entity((camera, camera_animater));
-        world.add_system(camera_system);
+        gfx.world.add_entity((camera, camera_animater));
+        gfx.world.add_system(camera_system);
         //Initiates lighting
         let light = Light {
             position: cgmath::vec3(200.0, 200.0, 1.0),
@@ -456,94 +455,92 @@ impl Game for Website {
         };
         let light_system = LightSystem::init(
             &[light.clone(), light2.clone()],
-            &engine.render_context.device,
+            &gfx.engine.render_context.device,
         );
-        world.add_system(light_system);
+        gfx.world.add_system(light_system);
 
         //Initiate Shaders
-        engine
-            .render_context
-            .add_shader("lights", include_str!("shaders/lights.wgsl"));
-        engine
-            .render_context
-            .add_shader("boxes", include_str!("shaders/boxes.wgsl"));
+        gfx.shader("lights", include_str!("shaders/lights.wgsl"));
+        gfx.shader("boxes", include_str!("shaders/boxes.wgsl"));
 
-        engine
-            .render_context
-            .add_shader("compute", include_str!("shaders/compute.wgsl"));
-        engine
-            .render_context
-            .add_shader("compute2", include_str!("shaders/compute2.wgsl"));
+        gfx.shader("compute", include_str!("shaders/compute.wgsl"));
+        gfx.shader("compute2", include_str!("shaders/compute2.wgsl"));
 
-        engine
-            .render_context
-            .add_shader("textured", include_str!("shaders/textured.wgsl"));
+        gfx.shader("textured", include_str!("shaders/textured.wgsl"));
         //Initiate meshes
-        let cube_mesh = cube::new().make_mb(&mut engine.render_context);
+        let cube_mesh = cube::new().make_mb(&mut gfx.engine.render_context);
 
         let light_ic = InstanceController::<GpuInstance>::new(
             vec![
                 Instance::new([200.0, 200.0, 1.0].into(), 10.0),
                 Instance::new([-200.0, -200.0, 1.0].into(), 10.0),
             ],
-            &mut engine.render_context,
+            &mut gfx.engine.render_context,
         );
-        let light_mat = MaterialBuilder::new()
-            .add_shader("lights")
-            .build::<Primitive, GpuInstance>(&world.resources, &mut engine.render_context);
 
+        let light_mat = gfx
+            .material::<Primitive, GpuInstance>()
+            .shader("lights")
+            .build();
         let light_entity = Renderable {
             material_handle: light_mat,
             instance_controller_handle: light_ic,
             mesh_handle: cube_mesh,
         };
 
-        world.add_entity((light_entity, markers::Light));
+        gfx.world.add_entity((light_entity, markers::Light));
         let instances = instances_list_cube(vec3(0, 0, 0), vec3(40, 50, 40));
 
         let instances_len = instances.len();
         let animation_handler = AnimationHandler::new_from_instances(&instances, vec![]);
-        let box_ic = InstanceController::<GpuInstance>::new(instances, &mut engine.render_context);
+        let box_ic =
+            InstanceController::<GpuInstance>::new(instances, &mut gfx.engine.render_context);
 
-        let box_mat = MaterialBuilder::new()
-            .add_shader("boxes")
-            .build::<Primitive, GpuInstance>(&world.resources, &mut engine.render_context);
+        let box_mat = gfx
+            .material::<Primitive, GpuInstance>()
+            .shader("boxes")
+            .build();
+
         let box_entity = Renderable {
             material_handle: box_mat,
             instance_controller_handle: box_ic,
             mesh_handle: cube_mesh,
         };
 
-        world.add_entity((box_entity, markers::Boxes, animation_handler));
+        gfx.world
+            .add_entity((box_entity, markers::Boxes, animation_handler));
 
         let test: [u32; 8] = [2, 5, 1, 2, 3, 4, 6, 8];
 
         let compute = ComputeBuilder::new(test.len())
-            .add_input_buffer(&test, &engine.render_context.device)
-            .build::<u32>(&mut engine.render_context, "compute");
+            .add_input_buffer(&test, &gfx.engine.render_context.device)
+            .build::<u32>(&mut gfx.engine.render_context, "compute");
 
         let mut cs = ComputeSystem::new();
         let compute = cs.add(compute);
 
-        world.add_system(cs);
+        gfx.world.add_system(cs);
 
-        world.add_entity((compute,));
+        gfx.world.add_entity((compute,));
 
         let datboi_obj = include_bytes!("../DATBOI.obj");
         let datboi_mtl = include_bytes!("../DATBOI.mtl");
 
         let model_ic = InstanceController::<GpuInstance>::new(
             vec![Instance::new([2.0, 2.0, 1.0].into(), 100.0)],
-            &mut engine.render_context,
+            &mut gfx.engine.render_context,
         );
 
-        let model_mat = MaterialBuilder::new()
-            .add_shader("textured")
-            .build::<Textured, GpuInstance>(&world.resources, &mut engine.render_context);
+        let model_mat = gfx
+            .material::<Textured, GpuInstance>()
+            .texture_from_color([0.5, 0.5, 0.5], None)
+            .shader("textured")
+            .build();
+
         let model = Model::load_obj(
             datboi_obj,
             Some(datboi_mtl),
-            &mut engine.render_context,
+            &mut gfx.engine.render_context,
             model_mat.clone(),
             model_ic.clone(),
         )
@@ -559,7 +556,7 @@ impl Game for Website {
             instance_controller_handle: model_ic,
             mesh_handle: cube_mesh,
         };
-        world.add_entity((model,));
+        gfx.world.add_entity((model,));
 
         // world.add_entity((box_entity2,));
 
@@ -570,7 +567,7 @@ impl Game for Website {
         // world.add_entity((box_entity4,));
         // world.add_entity((box_entity5,));
 
-        println!("{}", engine.render_context.gpu_objects.materials.len());
+        println!("{}", gfx.engine.render_context.gpu_objects.materials.len());
 
         let castle = include_bytes!("../castle.vox");
         let chr_knight = include_bytes!("../chr_knight.vox");
@@ -642,13 +639,13 @@ impl Game for Website {
             badapple_bin.to_vec(),
             camera_speed,
         );
-        engine.render_context.post_processing.new_effect(
+        gfx.engine.render_context.post_processing.new_effect(
             (
-                engine.render_context.config.width,
-                engine.render_context.config.height,
+                gfx.engine.render_context.config.width,
+                gfx.engine.render_context.config.height,
             )
                 .into(),
-            engine.render_context.config.format,
+            gfx.engine.render_context.config.format,
             Effect::ChromaticAberration,
         );
         self.camera_transition_handler.transition_map = camera_transition;

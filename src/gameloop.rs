@@ -282,6 +282,7 @@ impl Game for Website {
                         let mut query = world
                             .entities
                             .query::<(&Renderable, &mut AnimationHandler)>();
+                        println!("query len: {}", query.iter().len());
                         let (render, ah) = query.iter().next().expect("No AH");
 
                         let ic = engine
@@ -298,7 +299,7 @@ impl Game for Website {
                             true,
                             1.0,
                         );
-                        engine.change_shader(&render.material_handle, "lights");
+                        engine.change_shader(&render.material_handle, "boxes");
                         println!("snake!l!");
                         engine
                             .audio_handler
@@ -470,13 +471,13 @@ impl Game for Website {
         //Initiate meshes
         let cube_mesh = cube::new().make_mb(&mut gfx.engine.render_context);
 
-        let light_ic = InstanceController::<GpuInstance>::new(
-            vec![
+        let light_ic = gfx
+            .instances::<GpuInstance>()
+            .from_instances(vec![
                 Instance::new([200.0, 200.0, 1.0].into(), 10.0),
                 Instance::new([-200.0, -200.0, 1.0].into(), 10.0),
-            ],
-            &mut gfx.engine.render_context,
-        );
+            ])
+            .build();
 
         let light_mat = gfx
             .material::<Primitive, GpuInstance>()
@@ -493,8 +494,10 @@ impl Game for Website {
 
         let instances_len = instances.len();
         let animation_handler = AnimationHandler::new_from_instances(&instances, vec![]);
-        let box_ic =
-            InstanceController::<GpuInstance>::new(instances, &mut gfx.engine.render_context);
+        let box_ic = gfx
+            .instances::<GpuInstance>()
+            .from_instances(instances)
+            .build();
 
         let box_mat = gfx
             .material::<Primitive, GpuInstance>()
@@ -512,9 +515,12 @@ impl Game for Website {
 
         let test: [u32; 8] = [2, 5, 1, 2, 3, 4, 6, 8];
 
-        let compute = ComputeBuilder::new(test.len())
-            .add_input_buffer(&test, &gfx.engine.render_context.device)
-            .build::<u32>(&mut gfx.engine.render_context, "compute");
+        let compute = gfx
+            .compute::<u32>()
+            .shader("compute")
+            .size(test.len())
+            .input_buffer(&test)
+            .build();
 
         let mut cs = ComputeSystem::new();
         let compute = cs.add(compute);
@@ -526,10 +532,10 @@ impl Game for Website {
         let datboi_obj = include_bytes!("../DATBOI.obj");
         let datboi_mtl = include_bytes!("../DATBOI.mtl");
 
-        let model_ic = InstanceController::<GpuInstance>::new(
-            vec![Instance::new([2.0, 2.0, 1.0].into(), 100.0)],
-            &mut gfx.engine.render_context,
-        );
+        let model_ic = gfx
+            .instances::<GpuInstance>()
+            .from_instances(vec![Instance::new([2.0, 2.0, 1.0].into(), 100.0)])
+            .build();
 
         let model_mat = gfx
             .material::<Textured, GpuInstance>()
@@ -551,11 +557,11 @@ impl Game for Website {
         //     instance_controller_handle: model.instance,
         //     mesh_handle: model.meshes.get(1).unwrap().0.clone(),
         // };
-        let box_entity2 = Renderable {
-            material_handle: model_mat,
-            instance_controller_handle: model_ic,
-            mesh_handle: cube_mesh,
-        };
+        // let box_entity2 = Renderable {
+        //     material_handle: model_mat,
+        //     instance_controller_handle: model_ic,
+        //     mesh_handle: cube_mesh,
+        // };
         gfx.world.add_entity((model,));
 
         // world.add_entity((box_entity2,));

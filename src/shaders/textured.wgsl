@@ -25,6 +25,9 @@ var diffuse_texture: texture_2d<f32>;
 @group(2) @binding(1)
 var diffuse_sampler: sampler;
 
+@group(3) @binding(0)
+var<storage, read> particles: array<u32>;
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) texture: vec2<f32>,
@@ -98,7 +101,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let ambient_strength = 0.05;
     let specular_strength = 0.2;
-    let shininess = 32.0;
+    let shininess = f32(particles[0]);
 
     let N = normalize(in.world_normal);
     let V = normalize(camera.view_pos.xyz - in.world_position);

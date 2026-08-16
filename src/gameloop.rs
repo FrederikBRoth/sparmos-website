@@ -520,12 +520,8 @@ impl Game for Website {
             .shader("compute")
             .size(test.len())
             .input_buffer(&test)
+            // .readback()
             .build();
-
-        let mut cs = ComputeSystem::new();
-        let compute = cs.add(compute);
-
-        gfx.world.add_system(cs);
 
         gfx.world.add_entity((compute,));
 
@@ -540,6 +536,7 @@ impl Game for Website {
         let model_mat = gfx
             .material::<Textured, GpuInstance>()
             .texture_from_color([0.5, 0.5, 0.5], None)
+            .compute_buffer(compute)
             .shader("textured")
             .build();
 
@@ -552,26 +549,7 @@ impl Game for Website {
         )
         .unwrap();
 
-        // let box_entity1 = RenderableFuck {
-        //     material_handle: model.material,
-        //     instance_controller_handle: model.instance,
-        //     mesh_handle: model.meshes.get(1).unwrap().0.clone(),
-        // };
-        // let box_entity2 = Renderable {
-        //     material_handle: model_mat,
-        //     instance_controller_handle: model_ic,
-        //     mesh_handle: cube_mesh,
-        // };
         gfx.world.add_entity((model,));
-
-        // world.add_entity((box_entity2,));
-
-        //
-        // world.add_entity((box_entity1,));
-        // world.add_entity((box_entity2,));
-        // world.add_entity((box_entity3,));
-        // world.add_entity((box_entity4,));
-        // world.add_entity((box_entity5,));
 
         println!("{}", gfx.engine.render_context.gpu_objects.materials.len());
 

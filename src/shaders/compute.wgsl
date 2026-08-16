@@ -10,6 +10,6 @@ fn main(
     @builtin(global_invocation_id) global_invocation_id: vec3<u32>
 ) {
 
-    output[0] = 85u;
+    output[0] = 32u;
     output[6] = 85u;
 }

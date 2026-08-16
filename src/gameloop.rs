@@ -4,6 +4,7 @@ use std::{
     vec,
 };
 
+use rand::Rng;
 use sparmos_engine::{
     application::{
         gui_elements::tui::{TuiBorder, TuiPanel, TuiWindow, toggleable_tui_button},
@@ -21,7 +22,7 @@ use sparmos_engine::{
         geometry::{Model, Primitive, Textured},
         instance::{GpuInstance, Instance, InstanceController},
         post_processing::Effect,
-        render::Renderable,
+        render::{ComputeRenderable, Renderable},
     },
     egui::{self, FontFamily, FontId, Id, TextStyle, Ui, pos2, vec2},
     entities::cube,
@@ -44,7 +45,7 @@ use crate::{
     circular_buffer::CircularBuffer,
     easter_egg::EasterEgg,
     gui::sound_editor::{GuiState, Ratio, RatioHandle},
-    markers::{self},
+    markers::{self, Particle},
     transition::{CameraPositions, TransitionHandler},
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
 };
@@ -465,7 +466,12 @@ impl Game for Website {
         gfx.shader("boxes", include_str!("shaders/boxes.wgsl"));
 
         gfx.shader("compute", include_str!("shaders/compute.wgsl"));
-        gfx.shader("compute2", include_str!("shaders/compute2.wgsl"));
+
+        gfx.shader("particle", include_str!("shaders/particle.wgsl"));
+        gfx.shader(
+            "particle_render",
+            include_str!("shaders/particle_render.wgsl"),
+        );
 
         gfx.shader("textured", include_str!("shaders/textured.wgsl"));
         //Initiate meshes
@@ -518,12 +524,33 @@ impl Game for Website {
         let compute = gfx
             .compute::<u32>()
             .shader("compute")
-            .size(test.len())
+            .size(64)
             .input_buffer(&test)
             // .readback()
             .build();
 
         gfx.world.add_entity((compute,));
+        let particles = create_particles(128000);
+        let compute2 = gfx
+            .compute::<Particle>()
+            .shader("particle")
+            .size(128000)
+            // .input_buffer(&test)
+            .initial_data(&particles)
+            // .readback()
+            .build();
+        gfx.world.add_entity((compute2,));
+
+        let particle_rendering = gfx
+            .compute_rendering(compute2)
+            .shader("particle_render")
+            .build();
+        let particle_renderable = ComputeRenderable {
+            rendering_handle: particle_rendering,
+            vertex_count: 6,
+            instance_count: 128000,
+        };
+        gfx.world.add_entity((particle_renderable,));
 
         let datboi_obj = include_bytes!("../DATBOI.obj");
         let datboi_mtl = include_bytes!("../DATBOI.mtl");
@@ -811,4 +838,23 @@ impl Game for Website {
             });
         }
     }
+}
+
+pub fn create_particles(count: usize) -> Vec<Particle> {
+    let mut rng = rand::rng();
+
+    (0..count)
+        .map(|_| {
+            let angle = rng.random_range(0.0..std::f32::consts::TAU);
+            let radius = rng.random_range(0.0..2.0);
+
+            let x = angle.cos() * radius;
+            let z = angle.sin() * radius;
+
+            Particle {
+                position: [x, rng.random_range(-1.0..1.0), z, 1.0],
+                velocity: [x * 1.5, rng.random_range(2.0..8.0), z * 1.5, 0.0],
+            }
+        })
+        .collect()
 }

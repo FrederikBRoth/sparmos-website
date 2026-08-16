@@ -101,7 +101,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let ambient_strength = 0.05;
     let specular_strength = 0.2;
-    let shininess = f32(particles[0]);
+    let shininess = 32.0;
 
     let N = normalize(in.world_normal);
     let V = normalize(camera.view_pos.xyz - in.world_position);

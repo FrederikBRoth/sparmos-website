@@ -17,6 +17,7 @@ use sparmos_engine::{
     },
     cgmath::{self, *},
     core::{
+        buffer::Buffer,
         engine::Engine,
         entities::World,
         geometry::{Model, Primitive, Textured},
@@ -45,7 +46,7 @@ use crate::{
     circular_buffer::CircularBuffer,
     easter_egg::EasterEgg,
     gui::sound_editor::{GuiState, Ratio, RatioHandle},
-    markers::{self, Particle},
+    markers::{self, Bounds, ComputeArea, Particle},
     transition::{CameraPositions, TransitionHandler},
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
 };
@@ -473,6 +474,11 @@ impl Game for Website {
             include_str!("shaders/particle_render.wgsl"),
         );
 
+        gfx.shader(
+            "particle_render_with_mesh",
+            include_str!("shaders/particle_render_with_mesh.wgsl"),
+        );
+
         gfx.shader("textured", include_str!("shaders/textured.wgsl"));
         //Initiate meshes
         let cube_mesh = cube::new().make_mb(&mut gfx.engine.render_context);
@@ -531,24 +537,34 @@ impl Game for Website {
 
         gfx.world.add_entity((compute,));
         let particles = create_particles(128000);
+        let bounds = Bounds {
+            bounds: [100.0, 100.0, 100.0],
+            _padding: 0.0,
+        };
         let compute2 = gfx
             .compute::<Particle>()
             .shader("particle")
             .size(128000)
-            // .input_buffer(&test)
             .initial_data(&particles)
-            // .readback()
+            .input_buffer(&[bounds])
             .build();
         gfx.world.add_entity((compute2,));
 
+        let compute_area = ComputeArea {
+            global_pos: [100.0, 100.0, -3.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            _padding: 0.0,
+        };
         let particle_rendering = gfx
             .compute_rendering(compute2)
-            .shader("particle_render")
+            .mesh::<Primitive>()
+            .input_buffer(&[compute_area])
+            .shader("particle_render_with_mesh")
             .build();
+
         let particle_renderable = ComputeRenderable {
             rendering_handle: particle_rendering,
-            vertex_count: 6,
-            instance_count: 128000,
+            mesh_handle: cube_mesh,
         };
         gfx.world.add_entity((particle_renderable,));
 

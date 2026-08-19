@@ -7,6 +7,7 @@ use std::{
 use rand::Rng;
 use sparmos_engine::{
     application::{
+        graphics::Graphics,
         gui_elements::tui::{TuiBorder, TuiPanel, TuiWindow, toggleable_tui_button},
         state::{Game, State, map_value},
     },
@@ -17,11 +18,8 @@ use sparmos_engine::{
     },
     cgmath::{self, *},
     core::{
-        buffer::Buffer,
-        engine::Engine,
-        entities::World,
         geometry::{Model, Primitive, Textured},
-        instance::{GpuInstance, Instance, InstanceController},
+        instance::{GpuInstance, Instance},
         post_processing::Effect,
         render::{ComputeRenderable, Renderable},
     },
@@ -31,7 +29,6 @@ use sparmos_engine::{
     systems::{
         animation::{AnimationHandler, AnimationStep, AnimationType, Interpolation, StepState},
         camera::{Camera, CameraAnimator, CameraMode, CameraSystem, MovementKey, MovementPress},
-        compute::{ComputeBuilder, ComputeSystem},
         light::{Light, LightSystem},
     },
     winit::{
@@ -82,32 +79,51 @@ impl Default for Website {
 }
 
 impl Game for Website {
-    fn update(&mut self, dt: std::time::Duration, engine: &mut Engine, world: &mut World) {
+    fn update(&mut self, gfx: &mut Graphics) {
         // let mut camera_system = self.world.query::<&mut CameraSystem>();
         // let camera_system = camera_system.iter().next().unwrap();
 
-        let buffer_string = engine.arguments.with_arg::<CircularBuffer<String>, _>(
-            "keypress",
-            |buffer| match buffer {
-                Some(buffer) => buffer.to_string(),
-                None => "".to_string(),
-            },
-        );
+        let world = gfx.get_world();
+        let world = world.borrow();
+        let buffer_string =
+            gfx.engine
+                .arguments
+                .with_arg::<CircularBuffer<String>, _>("keypress", |buffer| match buffer {
+                    Some(buffer) => buffer.to_string(),
+                    None => "".to_string(),
+                });
 
         if buffer_string == "badapple" && !self.bad_apple.toggle {
-            world.query_first_with_resources::<&mut Camera>(|resource, camera| {
-                let camera_system = resource.get_system_mut::<CameraSystem>().unwrap();
-                camera_system.set(MovementKey::RotateLeft, MovementPress::Override);
-                camera.set_camera_mode(CameraMode::AnimatedMode);
-                self.bad_apple.init_camera(camera);
-                self.bad_apple.update_camera(camera_system, camera);
-            });
+            gfx.get_world()
+                .borrow()
+                .query_first::<&mut Camera>(|camera| {
+                    let camera_system = gfx.get_system_mut::<CameraSystem>();
+                    camera_system.set(MovementKey::RotateLeft, MovementPress::Override);
+                    camera.set_camera_mode(CameraMode::AnimatedMode);
+                    self.bad_apple.init_camera(camera);
+                    self.bad_apple.update_camera(camera_system, camera);
+                    // let cube_mesh = cube::new().make_mb(&mut gfx.engine.render_context);
+                    // let box_ic = gfx.instances::<GpuInstance>().build();
+                    //
+                    // let box_mat = gfx
+                    //     .material::<Primitive, GpuInstance>()
+                    //     .shader("boxes")
+                    //     .build();
+                    //
+                    // let box_entity = Renderable {
+                    //     material_handle: box_mat,
+                    //     instance_controller_handle: box_ic,
+                    //     mesh_handle: cube_mesh,
+                    // };
+                    //
+                    // gfx.add_entity((box_entity,));
+                });
 
             world.query_first::<(&Renderable, &mut AnimationHandler)>(|(render, ah)| {
                 self.voxel_handler
                     .transition_to_point_list(self.bad_apple.get_frame(), ah, 1.0);
 
-                engine.change_shader(&render.material_handle, "lights");
+                gfx.change_shader(&render.material_handle, "lights");
             });
             println!("Test");
 
@@ -115,8 +131,8 @@ impl Game for Website {
             log::warn!("EE started!");
         }
         if buffer_string == "ihatefun" && self.bad_apple.toggle {
-            world.query_first_with_resources::<&mut Camera>(|resource, camera| {
-                let camera_system = resource.get_system_mut::<CameraSystem>().unwrap();
+            world.query_first::<&mut Camera>(|camera| {
+                let camera_system = gfx.get_system_mut::<CameraSystem>();
                 camera_system.set(MovementKey::RotateLeft, MovementPress::NotPressed);
                 camera.set_camera_mode(CameraMode::FreeMode);
                 self.bad_apple.reset_camera(camera_system);
@@ -125,13 +141,14 @@ impl Game for Website {
             world.query_first::<(&Renderable, &mut AnimationHandler)>(|(render, ah)| {
                 self.voxel_handler
                     .transition_to_point_list(self.bad_apple.get_frame(), ah, 1.0);
-                engine.change_shader(&render.material_handle, "boxes");
+                gfx.change_shader(&render.material_handle, "boxes");
             });
             self.bad_apple.toggle = false;
 
             log::warn!("EE Stopped :(");
         }
-        let scroll_y = engine
+        let scroll_y = gfx
+            .engine
             .arguments
             .with_arg::<f64, _>("scrolly", |buffer| *buffer.unwrap_or(&0.0));
 
@@ -142,7 +159,8 @@ impl Game for Website {
                 _ => {
                     world.query_first::<(&Renderable, &mut AnimationHandler)>(
                         |(renderable, ah)| {
-                            let ic = engine
+                            let ic = gfx
+                                .engine
                                 .get_instance_controller(&renderable.instance_controller_handle);
                             ah.reset_instance_position_to_current_position(
                                 ic.instances_mut().as_mut(),
@@ -198,11 +216,13 @@ impl Game for Website {
         }
         if self.bad_apple.toggle {
             let target = 1.0 / self.bad_apple.fps;
-            self.bad_apple.elapsed += dt.as_secs_f32();
+            self.bad_apple.elapsed += gfx.dt().as_secs_f32();
 
             if self.bad_apple.elapsed >= target {
                 world.query_first::<(&Renderable, &mut AnimationHandler)>(|(renderable, ah)| {
-                    let ic = engine.get_instance_controller(&renderable.instance_controller_handle);
+                    let ic = gfx
+                        .engine
+                        .get_instance_controller(&renderable.instance_controller_handle);
                     ah.reset_instance_position_to_current_position(ic.instances_mut().as_mut());
                     self.voxel_handler.transition_to_point_list(
                         self.bad_apple.get_frame(),
@@ -210,9 +230,9 @@ impl Game for Website {
                         1.0,
                     );
                 });
-                world.query_first_with_resources::<&mut Camera>(|resource, camera| {
+                world.query_first::<&mut Camera>(|camera| {
                     log::warn!("{:?}", camera.eye.z);
-                    let camera_system = resource.get_system_mut::<CameraSystem>().unwrap();
+                    let camera_system = gfx.get_system_mut::<CameraSystem>();
                     self.bad_apple.update_camera(camera_system, camera)
                 });
 
@@ -234,9 +254,11 @@ impl Game for Website {
         &mut self,
         event: &winit::event::WindowEvent,
         _screen: &winit::dpi::PhysicalSize<u32>,
-        engine: &mut Engine,
-        world: &mut World,
+        gfx: &mut Graphics,
     ) {
+        let world = gfx.get_world();
+        let world = world.borrow();
+
         // let mut camera_system = self.world.query::<&mut CameraSystem>();
         // let camera_system = camera_system.iter().next().unwrap();
         // let (entity, camera) = state
@@ -255,7 +277,8 @@ impl Game for Website {
                     if state == &winit::event::ElementState::Pressed {
                         world.query_first::<(&Renderable, &mut AnimationHandler)>(
                             |(render, ah)| {
-                                let ic = engine
+                                let ic = gfx
+                                    .engine
                                     .get_instance_controller(&render.instance_controller_handle);
                                 ah.reset_instance_position_to_current_position(
                                     ic.instances_mut().as_mut(),
@@ -269,7 +292,8 @@ impl Game for Website {
                                 ah.update_instance(0.0, ic.instances_mut().as_mut());
                             },
                         );
-                        engine
+
+                        gfx.engine
                             .audio_handler
                             .as_mut()
                             .unwrap()
@@ -287,7 +311,8 @@ impl Game for Website {
                         println!("query len: {}", query.iter().len());
                         let (render, ah) = query.iter().next().expect("No AH");
 
-                        let ic = engine
+                        let ic = gfx
+                            .engine
                             .render_context
                             .gpu_objects
                             .instance_controllers
@@ -301,9 +326,9 @@ impl Game for Website {
                             true,
                             1.0,
                         );
-                        engine.change_shader(&render.material_handle, "boxes");
+                        gfx.change_shader(&render.material_handle, "boxes");
                         println!("snake!l!");
-                        engine
+                        gfx.engine
                             .audio_handler
                             .as_mut()
                             .unwrap()
@@ -320,7 +345,8 @@ impl Game for Website {
                             .query::<(&Renderable, &mut AnimationHandler)>();
                         let (render, ah) = query.iter().next().expect("No AH");
 
-                        let ic = engine
+                        let ic = gfx
+                            .engine
                             .render_context
                             .gpu_objects
                             .instance_controllers
@@ -341,7 +367,8 @@ impl Game for Website {
                     #[cfg(not(target_arch = "wasm32"))]
                     winit::event::ElementState::Pressed => {}
                     _ => {
-                        let buffer = engine
+                        let buffer = gfx
+                            .engine
                             .arguments
                             .args
                             .entry("keypress".to_string())
@@ -364,7 +391,8 @@ impl Game for Website {
                 KeyCode::End => match state {
                     #[cfg(not(target_arch = "wasm32"))]
                     winit::event::ElementState::Pressed => {
-                        let buffer = engine
+                        let buffer = gfx
+                            .engine
                             .arguments
                             .args
                             .entry("keypress".to_string())
@@ -416,7 +444,7 @@ impl Game for Website {
                 use sparmos_engine::winit::event::MouseScrollDelta;
 
                 if let MouseScrollDelta::LineDelta(_, y) = delta {
-                    engine
+                    gfx.engine
                         .arguments
                         .args
                         .insert("scrolly".to_string(), Box::new(*y));
@@ -425,8 +453,8 @@ impl Game for Website {
 
             _ => (),
         }
-        world.query_first_with_resources::<&mut Camera>(|resources, camera| {
-            let camera_system = resources.get_system_mut::<CameraSystem>().unwrap();
+        world.query_first::<&mut Camera>(|camera| {
+            let camera_system = gfx.get_system_mut::<CameraSystem>();
             camera_system.process_events(event, camera);
         });
     }
@@ -444,8 +472,8 @@ impl Game for Website {
         let camera_animater = CameraAnimator::new(0.75, camera.eye, camera.target);
 
         let camera_speed = camera_system.speed;
-        gfx.world.add_entity((camera, camera_animater));
-        gfx.world.add_system(camera_system);
+        gfx.add_entity((camera, camera_animater));
+        gfx.add_system(camera_system);
         //Initiates lighting
         let light = Light {
             position: cgmath::vec3(200.0, 200.0, 1.0),
@@ -460,7 +488,7 @@ impl Game for Website {
             &[light.clone(), light2.clone()],
             &gfx.engine.render_context.device,
         );
-        gfx.world.add_system(light_system);
+        gfx.add_system(light_system);
 
         //Initiate Shaders
         gfx.shader("lights", include_str!("shaders/lights.wgsl"));
@@ -501,11 +529,13 @@ impl Game for Website {
             mesh_handle: cube_mesh,
         };
 
-        gfx.world.add_entity((light_entity, markers::Light));
+        gfx.add_entity((light_entity, markers::Light));
         let instances = instances_list_cube(vec3(0, 0, 0), vec3(40, 50, 40));
 
         let instances_len = instances.len();
         let animation_handler = AnimationHandler::new_from_instances(&instances, vec![]);
+        let cube_mesh = cube::new().make_mb(&mut gfx.engine.render_context);
+
         let box_ic = gfx
             .instances::<GpuInstance>()
             .from_instances(instances)
@@ -522,8 +552,7 @@ impl Game for Website {
             mesh_handle: cube_mesh,
         };
 
-        gfx.world
-            .add_entity((box_entity, markers::Boxes, animation_handler));
+        gfx.add_entity((box_entity, markers::Boxes, animation_handler));
 
         let test: [u32; 8] = [2, 5, 1, 2, 3, 4, 6, 8];
 
@@ -535,7 +564,7 @@ impl Game for Website {
             // .readback()
             .build();
 
-        gfx.world.add_entity((compute,));
+        gfx.add_entity((compute,));
         let particles = create_particles(128000);
         let bounds = Bounds {
             bounds: [100.0, 100.0, 100.0],
@@ -548,7 +577,7 @@ impl Game for Website {
             .initial_data(&particles)
             .input_buffer(&[bounds])
             .build();
-        gfx.world.add_entity((compute2,));
+        gfx.add_entity((compute2,));
 
         let compute_area = ComputeArea {
             global_pos: [100.0, 100.0, -3.0],
@@ -566,7 +595,7 @@ impl Game for Website {
             rendering_handle: particle_rendering,
             mesh_handle: cube_mesh,
         };
-        gfx.world.add_entity((particle_renderable,));
+        gfx.add_entity((particle_renderable,));
 
         let datboi_obj = include_bytes!("../DATBOI.obj");
         let datboi_mtl = include_bytes!("../DATBOI.mtl");
@@ -592,7 +621,7 @@ impl Game for Website {
         )
         .unwrap();
 
-        gfx.world.add_entity((model,));
+        gfx.add_entity((model,));
 
         println!("{}", gfx.engine.render_context.gpu_objects.materials.len());
 
@@ -750,18 +779,21 @@ impl Game for Website {
         self.gui_context.piano_roll.create_track_from_midi(0, 0);
     }
 
-    fn resize(&mut self, engine: &mut Engine, world: &mut World) {
+    fn resize(&mut self, gfx: &mut Graphics) {
+        let world = gfx.get_world();
+        let world = world.borrow_mut();
+
         let mut query = world.entities.query::<&mut Camera>();
         let camera = query.iter().next().expect("No camera found");
 
-        camera.aspect =
-            engine.render_context.config.width as f32 / engine.render_context.config.height as f32;
+        camera.aspect = gfx.engine.render_context.config.width as f32
+            / gfx.engine.render_context.config.height as f32;
         println!("{:?}", camera.aspect);
         let new_fov = map_value(camera.aspect, 0.8, 1.88, 25.0, 55.0);
         camera.fovy = new_fov;
     }
 
-    fn gui_setup(&mut self, dt: std::time::Duration, engine: &mut Engine, ui: &mut Ui) {
+    fn gui_setup(&mut self, dt: std::time::Duration, gfx: &mut Graphics, ui: &mut Ui) {
         let mut visuals = egui::Visuals::dark();
 
         visuals.window_corner_radius = 0.0.into();
@@ -829,7 +861,7 @@ impl Game for Website {
                 TuiBorder::HardLines,
             )
             .show(ui, |ui| {
-                self.gui_context.piano_roll.ui(dt, engine, ui);
+                self.gui_context.piano_roll.ui(dt, &mut gfx.engine, ui);
             });
 
             //         egui::Window::new("Sound Player")
@@ -850,7 +882,7 @@ impl Game for Website {
                 TuiBorder::HardLines,
             )
             .show(ui, |ui| {
-                self.gui_context.sound_editor.ui(dt, engine, ui);
+                self.gui_context.sound_editor.ui(dt, &mut gfx.engine, ui);
             });
         }
     }

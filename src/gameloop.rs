@@ -1,4 +1,5 @@
 use std::{
+    cell::Ref,
     collections::{BTreeMap, HashMap},
     ops::Deref,
     vec,
@@ -18,6 +19,7 @@ use sparmos_engine::{
     },
     cgmath::{self, *},
     core::{
+        entities::World,
         geometry::{Model, Primitive, Textured},
         instance::{GpuInstance, Instance},
         post_processing::Effect,
@@ -79,12 +81,10 @@ impl Default for Website {
 }
 
 impl Game for Website {
-    fn update(&mut self, gfx: &mut Graphics) {
+    fn update(&mut self, gfx: &mut Graphics, world: Ref<'_, World>) {
         // let mut camera_system = self.world.query::<&mut CameraSystem>();
         // let camera_system = camera_system.iter().next().unwrap();
 
-        let world = gfx.get_world();
-        let world = world.borrow();
         let buffer_string =
             gfx.engine
                 .arguments
@@ -94,30 +94,13 @@ impl Game for Website {
                 });
 
         if buffer_string == "badapple" && !self.bad_apple.toggle {
-            gfx.get_world()
-                .borrow()
-                .query_first::<&mut Camera>(|camera| {
-                    let camera_system = gfx.get_system_mut::<CameraSystem>();
-                    camera_system.set(MovementKey::RotateLeft, MovementPress::Override);
-                    camera.set_camera_mode(CameraMode::AnimatedMode);
-                    self.bad_apple.init_camera(camera);
-                    self.bad_apple.update_camera(camera_system, camera);
-                    // let cube_mesh = cube::new().make_mb(&mut gfx.engine.render_context);
-                    // let box_ic = gfx.instances::<GpuInstance>().build();
-                    //
-                    // let box_mat = gfx
-                    //     .material::<Primitive, GpuInstance>()
-                    //     .shader("boxes")
-                    //     .build();
-                    //
-                    // let box_entity = Renderable {
-                    //     material_handle: box_mat,
-                    //     instance_controller_handle: box_ic,
-                    //     mesh_handle: cube_mesh,
-                    // };
-                    //
-                    // gfx.add_entity((box_entity,));
-                });
+            world.query_first::<&mut Camera>(|camera| {
+                let camera_system = gfx.get_system_mut::<CameraSystem>();
+                camera_system.set(MovementKey::RotateLeft, MovementPress::Override);
+                camera.set_camera_mode(CameraMode::AnimatedMode);
+                self.bad_apple.init_camera(camera);
+                self.bad_apple.update_camera(camera_system, camera);
+            });
 
             world.query_first::<(&Renderable, &mut AnimationHandler)>(|(render, ah)| {
                 self.voxel_handler
@@ -240,14 +223,6 @@ impl Game for Website {
                 self.bad_apple.elapsed -= target;
             }
         }
-
-        // world.query_first_with_resources::<(&mut Camera, &mut CameraAnimator)>(
-        //     |resources, (camera, camera_animator)| {
-        //         let camera_system = resources.get_system_mut::<CameraSystem>();
-        //         camera_system.update_camera(dt, &engine.render_context, camera);
-        //         camera_animator.update(dt.as_secs_f32(), camera);
-        //     },
-        // );
     }
 
     fn process_event(
@@ -255,13 +230,8 @@ impl Game for Website {
         event: &winit::event::WindowEvent,
         _screen: &winit::dpi::PhysicalSize<u32>,
         gfx: &mut Graphics,
+        world: Ref<'_, World>,
     ) {
-        let world = gfx.get_world();
-        let world = world.borrow();
-
-        // let mut camera_system = self.world.query::<&mut CameraSystem>();
-        // let camera_system = camera_system.iter().next().unwrap();
-        // let (entity, camera) = state
         match event {
             WindowEvent::KeyboardInput {
                 event:
@@ -280,9 +250,7 @@ impl Game for Website {
                                 let ic = gfx
                                     .engine
                                     .get_instance_controller(&render.instance_controller_handle);
-                                ah.reset_instance_position_to_current_position(
-                                    ic.instances_mut().as_mut(),
-                                );
+                                ah.reset_instance_position_to_current_position(ic.instances_mut());
                                 self.voxel_handler.transition_to_object(
                                     VoxelObjects::HandballBird,
                                     ah,
@@ -474,6 +442,7 @@ impl Game for Website {
         let camera_speed = camera_system.speed;
         gfx.add_entity((camera, camera_animater));
         gfx.add_system(camera_system);
+
         //Initiates lighting
         let light = Light {
             position: cgmath::vec3(200.0, 200.0, 1.0),
@@ -597,9 +566,6 @@ impl Game for Website {
         };
         gfx.add_entity((particle_renderable,));
 
-        let datboi_obj = include_bytes!("../DATBOI.obj");
-        let datboi_mtl = include_bytes!("../DATBOI.mtl");
-
         let model_ic = gfx
             .instances::<GpuInstance>()
             .from_instances(vec![Instance::new([2.0, 2.0, 1.0].into(), 100.0)])
@@ -612,14 +578,13 @@ impl Game for Website {
             .shader("textured")
             .build();
 
-        let model = Model::load_obj(
-            datboi_obj,
-            Some(datboi_mtl),
-            &mut gfx.engine.render_context,
-            model_mat.clone(),
-            model_ic.clone(),
-        )
-        .unwrap();
+        let model = gfx
+            .model()
+            .model(include_bytes!("../DATBOI.obj"))
+            .material(include_bytes!("../DATBOI.mtl"))
+            .texture_pipeline(model_mat)
+            .instances(model_ic)
+            .build();
 
         gfx.add_entity((model,));
 
@@ -779,10 +744,7 @@ impl Game for Website {
         self.gui_context.piano_roll.create_track_from_midi(0, 0);
     }
 
-    fn resize(&mut self, gfx: &mut Graphics) {
-        let world = gfx.get_world();
-        let world = world.borrow_mut();
-
+    fn resize(&mut self, gfx: &mut Graphics, world: Ref<'_, World>) {
         let mut query = world.entities.query::<&mut Camera>();
         let camera = query.iter().next().expect("No camera found");
 

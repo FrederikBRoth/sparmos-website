@@ -20,7 +20,7 @@ use sparmos_engine::{
     cgmath::{self, *},
     core::{
         entities::World,
-        geometry::{Model, Primitive, Textured},
+        geometry::{Primitive, Textured},
         instance::{GpuInstance, Instance},
         post_processing::Effect,
         render::{ComputeRenderable, Renderable},
@@ -95,11 +95,10 @@ impl Game for Website {
 
         if buffer_string == "badapple" && !self.bad_apple.toggle {
             world.query_first::<&mut Camera>(|camera| {
-                let camera_system = gfx.get_system_mut::<CameraSystem>();
-                camera_system.set(MovementKey::RotateLeft, MovementPress::Override);
+                camera.set(MovementKey::RotateLeft, MovementPress::Override);
                 camera.set_camera_mode(CameraMode::AnimatedMode);
                 self.bad_apple.init_camera(camera);
-                self.bad_apple.update_camera(camera_system, camera);
+                self.bad_apple.update_camera(camera);
             });
 
             world.query_first::<(&Renderable, &mut AnimationHandler)>(|(render, ah)| {
@@ -115,10 +114,9 @@ impl Game for Website {
         }
         if buffer_string == "ihatefun" && self.bad_apple.toggle {
             world.query_first::<&mut Camera>(|camera| {
-                let camera_system = gfx.get_system_mut::<CameraSystem>();
-                camera_system.set(MovementKey::RotateLeft, MovementPress::NotPressed);
+                camera.set(MovementKey::RotateLeft, MovementPress::NotPressed);
                 camera.set_camera_mode(CameraMode::FreeMode);
-                self.bad_apple.reset_camera(camera_system);
+                self.bad_apple.reset_camera(camera);
             });
 
             world.query_first::<(&Renderable, &mut AnimationHandler)>(|(render, ah)| {
@@ -215,8 +213,7 @@ impl Game for Website {
                 });
                 world.query_first::<&mut Camera>(|camera| {
                     log::warn!("{:?}", camera.eye.z);
-                    let camera_system = gfx.get_system_mut::<CameraSystem>();
-                    self.bad_apple.update_camera(camera_system, camera)
+                    self.bad_apple.update_camera(camera)
                 });
 
                 self.bad_apple.index += 1;
@@ -422,24 +419,23 @@ impl Game for Website {
             _ => (),
         }
         world.query_first::<&mut Camera>(|camera| {
-            let camera_system = gfx.get_system_mut::<CameraSystem>();
-            camera_system.process_events(event, camera);
+            camera.process_events(event);
         });
     }
 
     fn setup(&mut self, state: &mut State) {
         let gfx = &mut state.graphics;
         //Initiates Camera system
-        let camera = Camera::new(PhysicalSize::new(
-            state.size.width as f32,
-            state.size.height as f32,
-        ));
-        let camera_system =
-            CameraSystem::new(75.0, 50.0, &gfx.engine.render_context.device, &camera);
+        let camera = Camera::new(
+            PhysicalSize::new(state.size.width as f32, state.size.height as f32),
+            75.0,
+            50.0,
+        );
+        let camera_system = CameraSystem::new(gfx, &camera);
 
         let camera_animater = CameraAnimator::new(0.75, camera.eye, camera.target);
 
-        let camera_speed = camera_system.speed;
+        let camera_speed = camera.speed;
         gfx.add_entity((camera, camera_animater));
         gfx.add_system(camera_system);
 
@@ -556,7 +552,7 @@ impl Game for Website {
         let particle_rendering = gfx
             .compute_rendering(compute2)
             .mesh::<Primitive>()
-            .input_buffer(&[compute_area])
+            .input_data(&[compute_area])
             .shader("particle_render_with_mesh")
             .build();
 

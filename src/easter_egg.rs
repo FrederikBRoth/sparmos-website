@@ -81,11 +81,11 @@ impl EasterEgg {
         camera.target = bad_apple_target.into();
     }
 
-    pub fn reset_camera(&mut self, camera_system: &mut CameraSystem) {
-        camera_system.speed = self.original_camera_speed;
+    pub fn reset_camera(&mut self, camera: &mut Camera) {
+        camera.speed = self.original_camera_speed;
         self.index = 0;
     }
-    pub fn update_camera(&mut self, camera_system: &mut CameraSystem, camera: &mut Camera) {
+    pub fn update_camera(&mut self, camera: &mut Camera) {
         let x = camera.eye.z.abs(); // make x absolute
         let max = 3.0;
         let min = 0.5;
@@ -94,6 +94,6 @@ impl EasterEgg {
 
         let value = min + (max - min) / (1.0 + (x / midpoint).powf(k * midpoint));
 
-        camera_system.speed = value * 0.25;
+        camera.speed = value * 0.25;
     }
 }

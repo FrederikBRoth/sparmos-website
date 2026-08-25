@@ -1,12 +1,13 @@
 use std::{fmt, vec};
 
 use sparmos_engine::{
+    application::gui_elements::interactive::BufferController,
     audio::{
         audio_handler::{AudioCommand, AudioTrigger, hz_to_index, index_to_hz, index_to_key},
         synth::{AudioState, EnvelopeSegment, Sound, Waveform},
     },
     cgmath::{Vector2, vec2},
-    core::engine::Engine,
+    core::{engine::Engine, pbr::PhysicsBasedRenderingConstants},
     egui::{self, Color32, RichText, Ui},
     systems::animation::Interpolation,
 };
@@ -19,6 +20,7 @@ pub struct GuiState {
     pub sound_editor_toggled: bool,
     pub sound_editor: SoundEditor,
     pub piano_roll: PianoRoll,
+    pub bc: BufferController<PhysicsBasedRenderingConstants>,
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Ratio {

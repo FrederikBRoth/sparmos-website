@@ -19,20 +19,23 @@ use sparmos_engine::{
     },
     cgmath::{self, *},
     core::{
+        buffer::{Buffer, BufferType, UniformParameters},
         entities::World,
         geometry::{Primitive, Textured},
-        instance::{GpuInstance, Instance},
+        instance::{DefaultInstanceLayout, Instance},
+        pbr::PhysicsBasedRenderingConstants,
         post_processing::Effect,
         render::{ComputeRenderable, Renderable},
     },
     egui::{self, FontFamily, FontId, Id, TextStyle, Ui, pos2, vec2},
-    entities::cube,
+    entities::meshes::Meshes,
     log,
     systems::{
         animation::{AnimationHandler, AnimationStep, AnimationType, Interpolation, StepState},
         camera::{Camera, CameraAnimator, CameraMode, CameraSystem, MovementKey, MovementPress},
         light::{Light, LightSystem},
     },
+    wgpu,
     winit::{
         self,
         dpi::{PhysicalPosition, PhysicalSize},
@@ -77,6 +80,252 @@ impl Default for Website {
             gui_context: GuiState::default(),
             sounds: vec![],
         }
+    }
+}
+
+impl Website {
+    fn initiate_audio_playground(&mut self, state: &mut State) {
+        let keys = [
+            "C4", "C#4", "D4", "D#4", "E4", "F4", "F#4", "G4", "G#4", "A4", "A#4", "B4", "C5",
+        ];
+        const HARMONICS_PIANO_ORGANIC: [f32; 7] = [1.00, 0.30, 0.10, 0.05, 0.10, 0.7, 0.02];
+        let sounds = keys
+            .iter()
+            .map(|key| {
+                let freq = pianokey_to_hz(key);
+                println!("{}", freq.unwrap());
+                Sound::new(
+                    HARMONICS_PIANO_ORGANIC.into(),
+                    freq.expect("Key not parsed"),
+                    0.0,
+                    Waveform::SineWave,
+                    EnvelopeSegment {
+                        length: 0.01,
+                        interpolation: Interpolation::EaseInEaseOut,
+                    },
+                    EnvelopeSegment {
+                        length: 1.98,
+                        interpolation: Interpolation::EaseInEaseOut,
+                    },
+                    EnvelopeSegment {
+                        length: 0.1,
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect::<Vec<Sound>>();
+
+        let mut audio_triggers = HashMap::from([
+            (AudioTrigger::Keyboard(KeyCode::KeyF), sounds[0].clone()),
+            (AudioTrigger::Keyboard(KeyCode::KeyG), sounds[2].clone()),
+            (AudioTrigger::Keyboard(KeyCode::KeyH), sounds[4].clone()),
+            (AudioTrigger::Keyboard(KeyCode::KeyJ), sounds[5].clone()),
+            (AudioTrigger::Keyboard(KeyCode::KeyK), sounds[7].clone()),
+            (AudioTrigger::Keyboard(KeyCode::KeyL), sounds[9].clone()),
+            (
+                AudioTrigger::Keyboard(KeyCode::Semicolon),
+                sounds[11].clone(),
+            ),
+            (
+                AudioTrigger::GameLogic("test".to_string()),
+                sounds[6].clone(),
+            ),
+        ]);
+        //88 is the standard piano key count
+        for (i, sound) in get_full_piano().iter().enumerate() {
+            audio_triggers.insert(AudioTrigger::GameLogic(i.to_string()), sound.clone());
+        }
+        AudioHandler::init_sounds(state, audio_triggers);
+        self.gui_context.sound_editor.handles = [
+            RatioHandle {
+                ratio: 0.3,
+                kind: Ratio::AttackDecayBoundary,
+            },
+            RatioHandle {
+                ratio: 0.8,
+                kind: Ratio::DecayRefrainBoundary,
+            },
+        ]
+        .into();
+        self.sounds = sounds;
+        let bad_apple = include_bytes!("../badapple.mid");
+        let bad_apple_parsed = Midi::load_midi(bad_apple);
+        self.gui_context.piano_roll.midis.push(bad_apple_parsed);
+
+        let wii_midi = include_bytes!("../mii.mid");
+        let wii_parsed = Midi::load_midi(wii_midi);
+        self.gui_context.piano_roll.midis.push(wii_parsed);
+        self.gui_context.piano_roll.create_track_from_midi(0, 0);
+    }
+    fn initiate_playground(&mut self, gfx: &mut Graphics, camera_speed: f32) {
+        let instances = instances_list_cube(vec3(0, 0, 0), vec3(40, 50, 40));
+
+        let instances_len = instances.len();
+        let animation_handler = AnimationHandler::new_from_instances(&instances, vec![]);
+        let cube_mesh = Meshes::Cube
+            .create_primitive()
+            .make_mb(&mut gfx.engine.render_context);
+
+        let box_ic = gfx.instances().from_instances(instances).build();
+
+        let box_mat = gfx
+            .material::<Primitive, DefaultInstanceLayout>()
+            .shader("boxes")
+            .build();
+
+        let box_entity = Renderable {
+            material_handle: box_mat,
+            instance_controller_handle: box_ic,
+            mesh_handle: cube_mesh,
+        };
+
+        gfx.add_entity((box_entity, markers::Boxes, animation_handler));
+
+        let test: [u32; 8] = [2, 5, 1, 2, 3, 4, 6, 8];
+
+        let compute = gfx
+            .compute::<u32>()
+            .shader("compute")
+            .size(64)
+            .input_buffer(&test)
+            // .readback()
+            .build();
+
+        gfx.add_entity((compute,));
+        let particles = create_particles(128000);
+        let bounds = Bounds {
+            bounds: [100.0, 100.0, 100.0],
+            _padding: 0.0,
+        };
+        let compute2 = gfx
+            .compute::<Particle>()
+            .shader("particle")
+            .size(128000)
+            .initial_data(&particles)
+            .input_buffer(&[bounds])
+            .build();
+        gfx.add_entity((compute2,));
+
+        let compute_area = ComputeArea {
+            global_pos: [100.0, 100.0, -3.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            _padding: 0.0,
+        };
+        let particle_rendering = gfx
+            .compute_rendering(compute2)
+            .mesh::<Primitive>()
+            .input_data(&[compute_area])
+            .shader("particle_render_with_mesh")
+            .build();
+
+        let particle_renderable = ComputeRenderable {
+            rendering_handle: particle_rendering,
+            mesh_handle: cube_mesh,
+        };
+        gfx.add_entity((particle_renderable,));
+
+        let model_ic = gfx
+            .instances()
+            .from_instances(vec![Instance::new([2.0, 2.0, 1.0].into(), 100.0)])
+            .build();
+
+        let model_mat = gfx
+            .material::<Textured, DefaultInstanceLayout>()
+            .texture_from_color([0.5, 0.5, 0.5])
+            .compute_buffer(compute)
+            .shader("textured")
+            .build();
+
+        let model = gfx
+            .model()
+            .model(include_bytes!("../DATBOI.obj"))
+            .material(include_bytes!("../DATBOI.mtl"))
+            .texture_pipeline(model_mat)
+            .instances(model_ic)
+            .build();
+
+        gfx.add_entity((model,));
+        let castle = include_bytes!("../castle.vox");
+        let chr_knight = include_bytes!("../chr_knight.vox");
+        let rust_logo = include_bytes!("../rust.vox");
+        let c_plus_plus = include_bytes!("../cplusplus.vox");
+        let c_sharp = include_bytes!("../csharp.vox");
+        let docker = include_bytes!("../docker.vox");
+        let hb_fugl = include_bytes!("../hbfugl.vox");
+        let femo_snake = include_bytes!("../femoslangen.vox");
+        self.voxel_handler.add_voxel(castle, VoxelObjects::Castle);
+        self.voxel_handler
+            .add_voxel(chr_knight, VoxelObjects::Viking);
+        self.voxel_handler.add_voxel(rust_logo, VoxelObjects::Rust);
+        self.voxel_handler
+            .add_voxel(c_plus_plus, VoxelObjects::CPlusPLus);
+        self.voxel_handler.add_voxel(c_sharp, VoxelObjects::CSharp);
+        self.voxel_handler
+            .add_voxel(docker, VoxelObjects::Containerization);
+        self.voxel_handler
+            .add_voxel(hb_fugl, VoxelObjects::HandballBird);
+        self.voxel_handler
+            .add_voxel(femo_snake, VoxelObjects::FemogfirsSlangen);
+
+        for p in 0..instances_len {
+            self.voxel_handler.current_cubes.push(p);
+        }
+        let transition_map: BTreeMap<i64, VoxelObjects> = BTreeMap::from([
+            (300, VoxelObjects::Home),
+            (1300, VoxelObjects::CSharp),
+            (2100, VoxelObjects::Rust),
+            (2950, VoxelObjects::CPlusPLus),
+            (3850, VoxelObjects::Containerization),
+            (4750, VoxelObjects::CPlusPLus),
+            (5599, VoxelObjects::CSharp),
+            (6485, VoxelObjects::Rust),
+            (7200, VoxelObjects::CPlusPLus),
+        ]);
+        self.transition_handler.transition_map = transition_map;
+
+        let camera_middle = CameraPositions::Middle(((-120, 90, -120).into(), (20, 25, 20).into()));
+        let camera_right_side =
+            CameraPositions::RightSide(((-50, 50, -190).into(), (90, 25, -50).into()));
+        let camera_left_side =
+            CameraPositions::LeftSide(((90, 90, -190).into(), (-50, 25, -50).into()));
+        let camera_transition: BTreeMap<_, _> = [
+            (300, camera_middle.clone()),
+            (1300, camera_right_side.clone()),
+            (2100, camera_left_side.clone()),
+            (2950, camera_right_side.clone()),
+            (3850, camera_left_side.clone()),
+            (4750, camera_middle.clone()),
+            (5599, camera_right_side.clone()),
+            (6485, camera_left_side.clone()),
+            (7200, camera_middle.clone()),
+        ]
+        .into_iter()
+        .collect();
+
+        //Bad Apple setup
+        let badapple_bin = include_bytes!("../pixels.bin");
+
+        // let pixels = vec![]
+        let badapple = EasterEgg::new(
+            PhysicalSize {
+                width: 326,
+                height: 244,
+            },
+            30.0,
+            badapple_bin.to_vec(),
+            camera_speed,
+        );
+        gfx.engine.render_context.post_processing.new_effect(
+            (
+                gfx.engine.render_context.config.width,
+                gfx.engine.render_context.config.height,
+            )
+                .into(),
+            gfx.engine.render_context.config.format,
+            Effect::ChromaticAberration,
+        );
+        self.camera_transition_handler.transition_map = camera_transition;
+        self.bad_apple = badapple;
     }
 }
 
@@ -425,29 +674,38 @@ impl Game for Website {
 
     fn setup(&mut self, state: &mut State) {
         let gfx = &mut state.graphics;
+
         //Initiates Camera system
-        let camera = Camera::new(
+        let mut camera = Camera::new(
             PhysicalSize::new(state.size.width as f32, state.size.height as f32),
             75.0,
             50.0,
         );
+        camera.eye = Point3 {
+            x: -40.0,
+            y: -26.8,
+            z: -22.7,
+        };
+        camera.yaw = 25.0;
+        camera.pitch = 24.28;
         let camera_system = CameraSystem::new(gfx, &camera);
 
         let camera_animater = CameraAnimator::new(0.75, camera.eye, camera.target);
 
-        let camera_speed = camera.speed;
         gfx.add_entity((camera, camera_animater));
         gfx.add_system(camera_system);
 
         //Initiates lighting
         let light = Light {
-            position: cgmath::vec3(200.0, 200.0, 1.0),
+            position: cgmath::vec3(30.0, 30.0, 1.0),
             color: cgmath::vec3(1.0, 1.0, 1.0),
+            intensity: 5000.0,
         };
 
         let light2 = Light {
-            position: cgmath::vec3(-200.0, -200.0, 1.0),
+            position: cgmath::vec3(-30.0, -30.0, 1.0),
             color: cgmath::vec3(1.0, 1.0, 1.0),
+            intensity: 5000.0,
         };
         let light_system = LightSystem::init(
             &[light.clone(), light2.clone()],
@@ -474,18 +732,21 @@ impl Game for Website {
 
         gfx.shader("textured", include_str!("shaders/textured.wgsl"));
         //Initiate meshes
-        let cube_mesh = cube::new().make_mb(&mut gfx.engine.render_context);
+
+        let cube_mesh = Meshes::Cube
+            .create_primitive()
+            .make_mb(&mut gfx.engine.render_context);
 
         let light_ic = gfx
-            .instances::<GpuInstance>()
+            .instances()
             .from_instances(vec![
-                Instance::new([200.0, 200.0, 1.0].into(), 10.0),
-                Instance::new([-200.0, -200.0, 1.0].into(), 10.0),
+                Instance::new([30.0, 30.0, 1.0].into(), 10.0),
+                Instance::new([-100.0, -100.0, 1.0].into(), 10.0),
             ])
             .build();
 
         let light_mat = gfx
-            .material::<Primitive, GpuInstance>()
+            .material::<Primitive, DefaultInstanceLayout>()
             .shader("lights")
             .build();
         let light_entity = Renderable {
@@ -493,251 +754,102 @@ impl Game for Website {
             instance_controller_handle: light_ic,
             mesh_handle: cube_mesh,
         };
-
         gfx.add_entity((light_entity, markers::Light));
-        let instances = instances_list_cube(vec3(0, 0, 0), vec3(40, 50, 40));
 
-        let instances_len = instances.len();
-        let animation_handler = AnimationHandler::new_from_instances(&instances, vec![]);
-        let cube_mesh = cube::new().make_mb(&mut gfx.engine.render_context);
+        let sphere_mesh = Meshes::Sphere
+            .create_textured()
+            .make_mb(&mut gfx.engine.render_context);
 
-        let box_ic = gfx
-            .instances::<GpuInstance>()
-            .from_instances(instances)
-            .build();
-
-        let box_mat = gfx
-            .material::<Primitive, GpuInstance>()
-            .shader("boxes")
-            .build();
-
-        let box_entity = Renderable {
-            material_handle: box_mat,
-            instance_controller_handle: box_ic,
-            mesh_handle: cube_mesh,
+        let pbr_constants = PhysicsBasedRenderingConstants {
+            metallic: 0.0,
+            roughness: 0.0,
+            ao: 0.0,
         };
-
-        gfx.add_entity((box_entity, markers::Boxes, animation_handler));
-
-        let test: [u32; 8] = [2, 5, 1, 2, 3, 4, 6, 8];
-
-        let compute = gfx
-            .compute::<u32>()
-            .shader("compute")
-            .size(64)
-            .input_buffer(&test)
-            // .readback()
-            .build();
-
-        gfx.add_entity((compute,));
-        let particles = create_particles(128000);
-        let bounds = Bounds {
-            bounds: [100.0, 100.0, 100.0],
-            _padding: 0.0,
-        };
-        let compute2 = gfx
-            .compute::<Particle>()
-            .shader("particle")
-            .size(128000)
-            .initial_data(&particles)
-            .input_buffer(&[bounds])
-            .build();
-        gfx.add_entity((compute2,));
-
-        let compute_area = ComputeArea {
-            global_pos: [100.0, 100.0, -3.0],
-            rotation: [0.0, 0.0, 0.0, 1.0],
-            _padding: 0.0,
-        };
-        let particle_rendering = gfx
-            .compute_rendering(compute2)
-            .mesh::<Primitive>()
-            .input_data(&[compute_area])
-            .shader("particle_render_with_mesh")
-            .build();
-
-        let particle_renderable = ComputeRenderable {
-            rendering_handle: particle_rendering,
-            mesh_handle: cube_mesh,
-        };
-        gfx.add_entity((particle_renderable,));
-
-        let model_ic = gfx
-            .instances::<GpuInstance>()
-            .from_instances(vec![Instance::new([2.0, 2.0, 1.0].into(), 100.0)])
-            .build();
-
-        let model_mat = gfx
-            .material::<Textured, GpuInstance>()
-            .texture_from_color([0.5, 0.5, 0.5], None)
-            .compute_buffer(compute)
-            .shader("textured")
-            .build();
-
-        let model = gfx
-            .model()
-            .model(include_bytes!("../DATBOI.obj"))
-            .material(include_bytes!("../DATBOI.mtl"))
-            .texture_pipeline(model_mat)
-            .instances(model_ic)
-            .build();
-
-        gfx.add_entity((model,));
-
-        println!("{}", gfx.engine.render_context.gpu_objects.materials.len());
-
-        let castle = include_bytes!("../castle.vox");
-        let chr_knight = include_bytes!("../chr_knight.vox");
-        let rust_logo = include_bytes!("../rust.vox");
-        let c_plus_plus = include_bytes!("../cplusplus.vox");
-        let c_sharp = include_bytes!("../csharp.vox");
-        let docker = include_bytes!("../docker.vox");
-        let hb_fugl = include_bytes!("../hbfugl.vox");
-        let femo_snake = include_bytes!("../femoslangen.vox");
-        self.voxel_handler.add_voxel(castle, VoxelObjects::Castle);
-        self.voxel_handler
-            .add_voxel(chr_knight, VoxelObjects::Viking);
-        self.voxel_handler.add_voxel(rust_logo, VoxelObjects::Rust);
-        self.voxel_handler
-            .add_voxel(c_plus_plus, VoxelObjects::CPlusPLus);
-        self.voxel_handler.add_voxel(c_sharp, VoxelObjects::CSharp);
-        self.voxel_handler
-            .add_voxel(docker, VoxelObjects::Containerization);
-        self.voxel_handler
-            .add_voxel(hb_fugl, VoxelObjects::HandballBird);
-        self.voxel_handler
-            .add_voxel(femo_snake, VoxelObjects::FemogfirsSlangen);
-
-        for p in 0..instances_len {
-            self.voxel_handler.current_cubes.push(p);
-        }
-        let transition_map: BTreeMap<i64, VoxelObjects> = BTreeMap::from([
-            (300, VoxelObjects::Home),
-            (1300, VoxelObjects::CSharp),
-            (2100, VoxelObjects::Rust),
-            (2950, VoxelObjects::CPlusPLus),
-            (3850, VoxelObjects::Containerization),
-            (4750, VoxelObjects::CPlusPLus),
-            (5599, VoxelObjects::CSharp),
-            (6485, VoxelObjects::Rust),
-            (7200, VoxelObjects::CPlusPLus),
-        ]);
-        self.transition_handler.transition_map = transition_map;
-
-        let camera_middle = CameraPositions::Middle(((-120, 90, -120).into(), (20, 25, 20).into()));
-        let camera_right_side =
-            CameraPositions::RightSide(((-50, 50, -190).into(), (90, 25, -50).into()));
-        let camera_left_side =
-            CameraPositions::LeftSide(((90, 90, -190).into(), (-50, 25, -50).into()));
-        let camera_transition: BTreeMap<_, _> = [
-            (300, camera_middle.clone()),
-            (1300, camera_right_side.clone()),
-            (2100, camera_left_side.clone()),
-            (2950, camera_right_side.clone()),
-            (3850, camera_left_side.clone()),
-            (4750, camera_middle.clone()),
-            (5599, camera_right_side.clone()),
-            (6485, camera_left_side.clone()),
-            (7200, camera_middle.clone()),
-        ]
-        .into_iter()
-        .collect();
-
-        //Bad Apple setup
-        let badapple_bin = include_bytes!("../pixels.bin");
-
-        // let pixels = vec![]
-        let badapple = EasterEgg::new(
-            PhysicalSize {
-                width: 326,
-                height: 244,
-            },
-            30.0,
-            badapple_bin.to_vec(),
-            camera_speed,
+        let buffer = Buffer::new_init(
+            &[pbr_constants],
+            &gfx.engine.render_context.device,
+            BufferType::UniformBuffer(UniformParameters::default()),
         );
-        gfx.engine.render_context.post_processing.new_effect(
-            (
-                gfx.engine.render_context.config.width,
-                gfx.engine.render_context.config.height,
+
+        gfx.register_buffer(buffer.clone(), "material_test");
+
+        // let texture = gfx
+        //     .texture()
+        //     .bytes(
+        //         include_bytes!("../pbr_test/metallic_grid/oxidized-metal-clad_albedo.png"),
+        //         wgpu::TextureFormat::Rgba8UnormSrgb,
+        //     )
+        //     .bytes(
+        //         include_bytes!("../pbr_test/metallic_grid/oxidized-metal-clad_normal-dx.png"),
+        //         wgpu::TextureFormat::Rgba8Unorm,
+        //     )
+        //     .bytes(
+        //         include_bytes!("../pbr_test/metallic_grid/oxidized-metal-clad_metallic.png"),
+        //         wgpu::TextureFormat::Rgba8Unorm,
+        //     )
+        //     .bytes(
+        //         include_bytes!("../pbr_test/metallic_grid/oxidized-metal-clad_roughness.png"),
+        //         wgpu::TextureFormat::Rgba8Unorm,
+        //     )
+        //     .bytes(
+        //         include_bytes!("../pbr_test/metallic_grid/oxidized-metal-clad_ao.png"),
+        //         wgpu::TextureFormat::Rgba8Unorm,
+        //     )
+        //     .build();
+        // let sphere_mat = gfx
+        //     .material::<Textured, DefaultInstanceLayout>()
+        //     .shader("pbr_textured")
+        //     // .texture_from_color([0.0, 1.0, 0.0])
+        //     .texture(texture)
+        //     .build();
+        //
+        // let sphere_ic = gfx.instances().build();
+        // let sphere_entity = Renderable {
+        //     material_handle: sphere_mat,
+        //     instance_controller_handle: sphere_ic,
+        //     mesh_handle: sphere_mesh,
+        // };
+        // gfx.add_entity((sphere_entity,));
+        let texture2 = gfx
+            .texture()
+            .bytes(
+                include_bytes!("../pbr_test/rusted_metal/rustediron2_basecolor.png"),
+                wgpu::TextureFormat::Rgba8UnormSrgb,
             )
-                .into(),
-            gfx.engine.render_context.config.format,
-            Effect::ChromaticAberration,
-        );
-        self.camera_transition_handler.transition_map = camera_transition;
-        self.bad_apple = badapple;
-        let keys = [
-            "C4", "C#4", "D4", "D#4", "E4", "F4", "F#4", "G4", "G#4", "A4", "A#4", "B4", "C5",
-        ];
-        const HARMONICS_PIANO_ORGANIC: [f32; 7] = [1.00, 0.30, 0.10, 0.05, 0.10, 0.7, 0.02];
-        let sounds = keys
-            .iter()
-            .map(|key| {
-                let freq = pianokey_to_hz(key);
-                println!("{}", freq.unwrap());
-                Sound::new(
-                    HARMONICS_PIANO_ORGANIC.into(),
-                    freq.expect("Key not parsed"),
-                    0.0,
-                    Waveform::SineWave,
-                    EnvelopeSegment {
-                        length: 0.01,
-                        interpolation: Interpolation::EaseInEaseOut,
-                    },
-                    EnvelopeSegment {
-                        length: 1.98,
-                        interpolation: Interpolation::EaseInEaseOut,
-                    },
-                    EnvelopeSegment {
-                        length: 0.1,
-                        ..Default::default()
-                    },
-                )
-            })
-            .collect::<Vec<Sound>>();
+            .bytes(
+                include_bytes!("../pbr_test/rusted_metal/rustediron2_normal.png"),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .bytes(
+                include_bytes!("../pbr_test/rusted_metal/rustediron2_metallic.png"),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .bytes(
+                include_bytes!("../pbr_test/rusted_metal/rustediron2_roughness.png"),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .bytes(
+                include_bytes!("../pbr_test/rusted_metal/blank_ao_2048x2048.png"),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .build();
+        let sphere_mat2 = gfx
+            .material::<Textured, DefaultInstanceLayout>()
+            .shader("pbr_textured")
+            // .texture_from_color([0.0, 1.0, 0.0])
+            .texture(texture2)
+            .build();
 
-        let mut audio_triggers = HashMap::from([
-            (AudioTrigger::Keyboard(KeyCode::KeyF), sounds[0].clone()),
-            (AudioTrigger::Keyboard(KeyCode::KeyG), sounds[2].clone()),
-            (AudioTrigger::Keyboard(KeyCode::KeyH), sounds[4].clone()),
-            (AudioTrigger::Keyboard(KeyCode::KeyJ), sounds[5].clone()),
-            (AudioTrigger::Keyboard(KeyCode::KeyK), sounds[7].clone()),
-            (AudioTrigger::Keyboard(KeyCode::KeyL), sounds[9].clone()),
-            (
-                AudioTrigger::Keyboard(KeyCode::Semicolon),
-                sounds[11].clone(),
-            ),
-            (
-                AudioTrigger::GameLogic("test".to_string()),
-                sounds[6].clone(),
-            ),
-        ]);
-        //88 is the standard piano key count
-        for (i, sound) in get_full_piano().iter().enumerate() {
-            audio_triggers.insert(AudioTrigger::GameLogic(i.to_string()), sound.clone());
-        }
-        AudioHandler::init_sounds(state, audio_triggers);
-        self.gui_context.sound_editor.handles = [
-            RatioHandle {
-                ratio: 0.3,
-                kind: Ratio::AttackDecayBoundary,
-            },
-            RatioHandle {
-                ratio: 0.8,
-                kind: Ratio::DecayRefrainBoundary,
-            },
-        ]
-        .into();
-        self.sounds = sounds;
-        let bad_apple = include_bytes!("../badapple.mid");
-        let bad_apple_parsed = Midi::load_midi(bad_apple);
-        self.gui_context.piano_roll.midis.push(bad_apple_parsed);
+        let sphere_ic2 = gfx.instances().origin(vec3(20.0, 20.0, 20.0)).build();
+        let sphere_entity2 = Renderable {
+            material_handle: sphere_mat2,
+            instance_controller_handle: sphere_ic2,
+            mesh_handle: sphere_mesh,
+        };
+        gfx.add_entity((sphere_entity2,));
 
-        let wii_midi = include_bytes!("../mii.mid");
-        let wii_parsed = Midi::load_midi(wii_midi);
-        self.gui_context.piano_roll.midis.push(wii_parsed);
-        self.gui_context.piano_roll.create_track_from_midi(0, 0);
+        // self.initiate_playground(gfx, camera_speed);
+        // self.initiate_audio_playground(state);
     }
 
     fn resize(&mut self, gfx: &mut Graphics, world: Ref<'_, World>) {
@@ -752,6 +864,9 @@ impl Game for Website {
     }
 
     fn gui_setup(&mut self, dt: std::time::Duration, gfx: &mut Graphics, ui: &mut Ui) {
+        //WARN: GUI DISABLED
+        // return;
+
         let mut visuals = egui::Visuals::dark();
 
         visuals.window_corner_radius = 0.0.into();
@@ -813,7 +928,7 @@ impl Game for Website {
         if self.gui_context.piano_roll_toggled {
             TuiWindow::new(
                 Id::new("piano roll"),
-                "Piano Roll",
+                "Piao Roll",
                 pos2(100.0, 200.0),
                 vec2(800.0, 600.0),
                 TuiBorder::HardLines,
@@ -843,6 +958,17 @@ impl Game for Website {
                 self.gui_context.sound_editor.ui(dt, &mut gfx.engine, ui);
             });
         }
+
+        TuiWindow::new(
+            Id::new("Material Editor"),
+            "Material Sliders",
+            pos2(100.0, 200.0),
+            vec2(300.0, 200.0),
+            TuiBorder::HardLines,
+        )
+        .show(ui, |ui| {
+            self.gui_context.bc.ui(ui, gfx, "material_test");
+        })
     }
 }
 

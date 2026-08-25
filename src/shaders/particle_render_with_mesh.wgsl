@@ -8,6 +8,7 @@ var<uniform> camera: CameraUniform;
 struct Light {
     position: vec3<f32>, // xyz + padding
     color: vec3<f32>,  // rgb + padding
+    intensity: f32,
 };
 
 struct LightBlock {

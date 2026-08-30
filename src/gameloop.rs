@@ -22,7 +22,8 @@ use sparmos_engine::{
         buffer::{Buffer, BufferType, UniformParameters},
         entities::World,
         geometry::{Primitive, Textured},
-        instance::{DefaultInstanceLayout, Instance},
+        instance::{DefaultInstanceLayout, Instance, InstanceTemplate},
+        object_loading::model::Model,
         pbr::PhysicsBasedRenderingConstants,
         post_processing::Effect,
         render::{ComputeRenderable, Renderable},
@@ -231,7 +232,7 @@ impl Website {
 
         let model_mat = gfx
             .material::<Textured, DefaultInstanceLayout>()
-            .texture_from_color([0.5, 0.5, 0.5])
+            .texture_from_color([0.5, 0.5, 0.5], "datboi")
             .compute_buffer(compute)
             .shader("textured")
             .build();
@@ -682,12 +683,15 @@ impl Game for Website {
             50.0,
         );
         camera.eye = Point3 {
-            x: -40.0,
-            y: -26.8,
-            z: -22.7,
+            x: -17.16,
+            y: 6.1,
+            z: -12.4,
         };
         camera.yaw = 25.0;
-        camera.pitch = 24.28;
+        camera.pitch = -1.4;
+        camera.update_camera(gfx.dt());
+        camera.update_forward();
+        let camera_speed = camera.speed;
         let camera_system = CameraSystem::new(gfx, &camera);
 
         let camera_animater = CameraAnimator::new(0.75, camera.eye, camera.target);
@@ -697,15 +701,15 @@ impl Game for Website {
 
         //Initiates lighting
         let light = Light {
-            position: cgmath::vec3(30.0, 30.0, 1.0),
+            position: cgmath::vec3(5.0, 5.0, 1.0),
             color: cgmath::vec3(1.0, 1.0, 1.0),
-            intensity: 5000.0,
+            intensity: 150.0,
         };
 
         let light2 = Light {
-            position: cgmath::vec3(-30.0, -30.0, 1.0),
+            position: cgmath::vec3(-5.0, -5.0, 1.0),
             color: cgmath::vec3(1.0, 1.0, 1.0),
-            intensity: 5000.0,
+            intensity: 150.0,
         };
         let light_system = LightSystem::init(
             &[light.clone(), light2.clone()],
@@ -737,24 +741,24 @@ impl Game for Website {
             .create_primitive()
             .make_mb(&mut gfx.engine.render_context);
 
-        let light_ic = gfx
-            .instances()
-            .from_instances(vec![
-                Instance::new([30.0, 30.0, 1.0].into(), 10.0),
-                Instance::new([-100.0, -100.0, 1.0].into(), 10.0),
-            ])
-            .build();
-
-        let light_mat = gfx
-            .material::<Primitive, DefaultInstanceLayout>()
-            .shader("lights")
-            .build();
-        let light_entity = Renderable {
-            material_handle: light_mat,
-            instance_controller_handle: light_ic,
-            mesh_handle: cube_mesh,
-        };
-        gfx.add_entity((light_entity, markers::Light));
+        // let light_ic = gfx
+        //     .instances()
+        //     .from_instances(vec![
+        //         Instance::new([30.0, 30.0, 1.0].into(), 10.0),
+        //         Instance::new([-100.0, -100.0, 1.0].into(), 10.0),
+        //     ])
+        //     .build();
+        //
+        // let light_mat = gfx
+        //     .material::<Primitive, DefaultInstanceLayout>()
+        //     .shader("lights")
+        //     .build();
+        // let light_entity = Renderable {
+        //     material_handle: light_mat,
+        //     instance_controller_handle: light_ic,
+        //     mesh_handle: cube_mesh,
+        // };
+        // gfx.add_entity((light_entity, markers::Light));
 
         let sphere_mesh = Meshes::Sphere
             .create_textured()
@@ -773,62 +777,79 @@ impl Game for Website {
 
         gfx.register_buffer(buffer.clone(), "material_test");
 
-        // let texture = gfx
-        //     .texture()
-        //     .bytes(
-        //         include_bytes!("../pbr_test/metallic_grid/oxidized-metal-clad_albedo.png"),
-        //         wgpu::TextureFormat::Rgba8UnormSrgb,
-        //     )
-        //     .bytes(
-        //         include_bytes!("../pbr_test/metallic_grid/oxidized-metal-clad_normal-dx.png"),
-        //         wgpu::TextureFormat::Rgba8Unorm,
-        //     )
-        //     .bytes(
-        //         include_bytes!("../pbr_test/metallic_grid/oxidized-metal-clad_metallic.png"),
-        //         wgpu::TextureFormat::Rgba8Unorm,
-        //     )
-        //     .bytes(
-        //         include_bytes!("../pbr_test/metallic_grid/oxidized-metal-clad_roughness.png"),
-        //         wgpu::TextureFormat::Rgba8Unorm,
-        //     )
-        //     .bytes(
-        //         include_bytes!("../pbr_test/metallic_grid/oxidized-metal-clad_ao.png"),
-        //         wgpu::TextureFormat::Rgba8Unorm,
-        //     )
-        //     .build();
-        // let sphere_mat = gfx
-        //     .material::<Textured, DefaultInstanceLayout>()
-        //     .shader("pbr_textured")
-        //     // .texture_from_color([0.0, 1.0, 0.0])
-        //     .texture(texture)
-        //     .build();
-        //
-        // let sphere_ic = gfx.instances().build();
-        // let sphere_entity = Renderable {
-        //     material_handle: sphere_mat,
-        //     instance_controller_handle: sphere_ic,
-        //     mesh_handle: sphere_mesh,
-        // };
-        // gfx.add_entity((sphere_entity,));
+        let cubemap_texture = gfx.texture("cubemap").hdri_cubemap(include_bytes!(
+            "../pbr_test/cubemaps/historic_cloister_passage_4k.hdr"
+        ));
+        let ibl_maps = gfx.texture("ibl").ibl_maps(&cubemap_texture);
+        // let cubemap_irradiance = gfx
+        //     .texture("cubemap")
+        //     .hdri_irradiance_map(include_bytes!("../pbr_test/cubemaps/solitude_night_4k.hdr"));
+
+        // let cubemap_irradiance = gfx.texture("cubemap").hdri_irradiance_map(include_bytes!(
+        //     "../pbr_test/cubemaps/kloofendal_48d_partly_cloudy_puresky_4k.hdr"
+        // ));
+
+        // let cubemap_irradiance = gfx
+        //     .texture("cubemap")
+        //     .hdri_irradiance_map(include_bytes!("../pbr_test/cubemaps/mealie_road_4k.hdr"));
+
+        let texture = gfx
+            .pbr_texture("sphere2")
+            .diffuse_bytes(
+                include_bytes!("../pbr_test/viktors_peber/HerringBone_INST_basecolor.png"),
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+            )
+            .normal_bytes(
+                include_bytes!("../pbr_test/viktors_peber/HerringBone_INST_normal.PNG"),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .metallic_bytes(
+                include_bytes!("../pbr_test/viktors_peber/viktor_peber_mettalic.png"),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .roughness_bytes(
+                include_bytes!("../pbr_test/viktors_peber/HerringBone_INST_roughness.png"),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .ao_bytes(
+                include_bytes!("../pbr_test/viktors_peber/HerringBone_INST_ambientocclusion.png"),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .build();
+        let sphere_mat = gfx
+            .material::<Textured, DefaultInstanceLayout>()
+            .shader("pbr_textured")
+            // .texture_from_color([0.0, 1.0, 0.0])
+            .texture(texture)
+            .texture(ibl_maps.clone())
+            .build();
+
+        let sphere_ic = gfx.instances().build();
+        let sphere_entity = Renderable {
+            material_handle: sphere_mat,
+            instance_controller_handle: sphere_ic,
+            mesh_handle: sphere_mesh,
+        };
+        gfx.add_entity((sphere_entity,));
         let texture2 = gfx
-            .texture()
-            .bytes(
+            .pbr_texture("sphere1")
+            .diffuse_bytes(
                 include_bytes!("../pbr_test/rusted_metal/rustediron2_basecolor.png"),
                 wgpu::TextureFormat::Rgba8UnormSrgb,
             )
-            .bytes(
+            .normal_bytes(
                 include_bytes!("../pbr_test/rusted_metal/rustediron2_normal.png"),
                 wgpu::TextureFormat::Rgba8Unorm,
             )
-            .bytes(
+            .metallic_bytes(
                 include_bytes!("../pbr_test/rusted_metal/rustediron2_metallic.png"),
                 wgpu::TextureFormat::Rgba8Unorm,
             )
-            .bytes(
+            .roughness_bytes(
                 include_bytes!("../pbr_test/rusted_metal/rustediron2_roughness.png"),
                 wgpu::TextureFormat::Rgba8Unorm,
             )
-            .bytes(
+            .ao_bytes(
                 include_bytes!("../pbr_test/rusted_metal/blank_ao_2048x2048.png"),
                 wgpu::TextureFormat::Rgba8Unorm,
             )
@@ -838,9 +859,10 @@ impl Game for Website {
             .shader("pbr_textured")
             // .texture_from_color([0.0, 1.0, 0.0])
             .texture(texture2)
+            .texture(ibl_maps.clone())
             .build();
 
-        let sphere_ic2 = gfx.instances().origin(vec3(20.0, 20.0, 20.0)).build();
+        let sphere_ic2 = gfx.instances().origin(vec3(30.0, 30.0, 0.0)).build();
         let sphere_entity2 = Renderable {
             material_handle: sphere_mat2,
             instance_controller_handle: sphere_ic2,
@@ -848,6 +870,81 @@ impl Game for Website {
         };
         gfx.add_entity((sphere_entity2,));
 
+        let texture = gfx
+            .pbr_texture("sphere3")
+            .diffuse_bytes(
+                include_bytes!("../pbr_test/viktors_peber/Wood_Planks_basecolor.png"),
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+            )
+            .normal_bytes(
+                include_bytes!("../pbr_test/viktors_peber/Wood_Planks_normal.png"),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .metallic_bytes(
+                include_bytes!("../pbr_test/viktors_peber/viktor_peber_mettalic.png"),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .roughness_bytes(
+                include_bytes!("../pbr_test/viktors_peber/Wood_Planks_roughness.png"),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .ao_bytes(
+                include_bytes!("../pbr_test/viktors_peber/Wood_Planks_ambientocclusion.png"),
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .build();
+        let sphere_mat = gfx
+            .material::<Textured, DefaultInstanceLayout>()
+            .shader("pbr_textured")
+            // .texture_from_color([0.0, 1.0, 0.0])
+            .texture(texture)
+            .texture(ibl_maps.clone())
+            .build();
+
+        let sphere_ic = gfx.instances().origin(vec3(10.0, 10.0, 0.0)).build();
+        let sphere_entity = Renderable {
+            material_handle: sphere_mat,
+            instance_controller_handle: sphere_ic,
+            mesh_handle: sphere_mesh,
+        };
+        gfx.add_entity((sphere_entity,));
+
+        // let cubemap_texture = gfx.texture("cubemap").cubemap(include_bytes!(
+        //     "../pbr_test/cubemaps/cubemap_sky_17-512x512.png"
+        // ));
+
+        // let cubemap_texture = gfx
+        //     .texture("cubemap")
+        //     .hdri_cubemap(include_bytes!("../pbr_test/cubemaps/solitude_night_4k.hdr"));
+        // let cubemap_texture = gfx.texture("cubemap").hdri_cubemap(include_bytes!(
+        //     "../pbr_test/cubemaps/kloofendal_48d_partly_cloudy_puresky_4k.hdr"
+        // ));
+
+        // let cubemap_texture = gfx
+        //     .texture("cubemap")
+        //     .hdri_cubemap(include_bytes!("../pbr_test/cubemaps/mealie_road_4k.hdr"));
+        gfx.add_skybox(cubemap_texture);
+
+        let model_ic = gfx
+            .instances()
+            .origin(vec3(10.0, 10.0, 10.0))
+            .scale(2000.0)
+            .build();
+
+        // let model = gfx
+        //     .model()
+        //     .model(include_bytes!("../objs/Demo_track.obj"))
+        //     .primitive_pipeline(model_mat)
+        //     .instances(model_ic)
+        //     .build();
+        //
+        let model = Model::load_gltf(
+            gfx,
+            include_bytes!("../objs/gltfs/tank/Oth97_CNO_Consul.glb"),
+            model_ic,
+            sphere_mat,
+        );
+        gfx.add_entity((model,));
         // self.initiate_playground(gfx, camera_speed);
         // self.initiate_audio_playground(state);
     }

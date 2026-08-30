@@ -1,5 +1,3 @@
-use sparmos_engine::cgmath::Vector4;
-
 #[derive(Debug)]
 pub struct Boxes;
 #[derive(Debug)]

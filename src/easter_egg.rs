@@ -1,8 +1,4 @@
-use sparmos_engine::{
-    cgmath::Vector3,
-    systems::camera::{Camera, CameraSystem},
-    winit::dpi::PhysicalSize,
-};
+use sparmos_engine::{cgmath::Vector3, systems::camera::Camera, winit::dpi::PhysicalSize};
 
 pub enum EasterEggType {
     BadApple,

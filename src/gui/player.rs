@@ -112,11 +112,8 @@ impl PianoRoll {
                         .auto_shrink([false, false])
                         .max_width(self.duration_ticks / SCALE);
 
-                    match self.audio_state {
-                        AudioState::Playing => {
-                            scroll_area = scroll_area.scroll_offset(egui::vec2(self.scroll_x, 0.0))
-                        }
-                        _ => {}
+                    if self.audio_state == AudioState::Playing {
+                        scroll_area = scroll_area.scroll_offset(egui::vec2(self.scroll_x, 0.0))
                     }
                     scroll_area.show(ui, |ui| {
                         let (rect, response, painter) = self.draw_piano_roll(
@@ -128,21 +125,17 @@ impl PianoRoll {
                         let ticks_per_second = self.ticks_per_quarter * (1_000_000.0 / self.tempo);
 
                         let progress = self.sample_time * ticks_per_second;
-                        match self.audio_state {
-                            AudioState::Playing => {
-                                let dt_sec = dt.as_secs_f32();
-                                self.sample_time += dt_sec; // now in seconds
+                        if self.audio_state == AudioState::Playing {
+                            let dt_sec = dt.as_secs_f32();
+                            self.sample_time += dt_sec; // now in seconds
 
-                                let view_width = ui.clip_rect().width();
-                                let target_scroll =
-                                    ((progress / SCALE) - view_width * 0.5).max(0.0);
+                            let view_width = ui.clip_rect().width();
+                            let target_scroll = ((progress / SCALE) - view_width * 0.5).max(0.0);
 
-                                let smoothing = 10.0;
-                                let lerp_factor = 1.0 - (-smoothing * dt_sec).exp();
+                            let smoothing = 10.0;
+                            let lerp_factor = 1.0 - (-smoothing * dt_sec).exp();
 
-                                self.scroll_x += (target_scroll - self.scroll_x) * lerp_factor;
-                            }
-                            _ => {}
+                            self.scroll_x += (target_scroll - self.scroll_x) * lerp_factor;
                         };
 
                         let x = rect.left() + progress / SCALE;
@@ -154,51 +147,46 @@ impl PianoRoll {
                         for (row, bar) in self.keys.iter().enumerate() {
                             for (col, sound) in bar.iter().enumerate() {
                                 let head_pos = x - rect.left();
-                                if should_play(sound, head_pos) {
-                                    if !self.playing_notes.contains(sound) {
-                                        println!(
-                                            "{:?} layer: {} has started playing!!!",
-                                            sound,
+                                if should_play(sound, head_pos)
+                                    && !self.playing_notes.contains(sound)
+                                {
+                                    println!(
+                                        "{:?} layer: {} has started playing!!!",
+                                        sound,
+                                        self.keys.len() - 1 - row + OCTAVE_OFFSET
+                                    );
+                                    engine.get_audio_handler().update_from_gamelogic(
+                                        AudioCommand::ForcePlay(AudioTrigger::gamelogic(&format!(
+                                            "{}",
                                             self.keys.len() - 1 - row + OCTAVE_OFFSET
-                                        );
-                                        engine.get_audio_handler().update_from_gamelogic(
-                                            AudioCommand::ForcePlay(AudioTrigger::gamelogic(
-                                                &format!(
-                                                    "{}",
-                                                    self.keys.len() - 1 - row + OCTAVE_OFFSET
-                                                ),
-                                            )),
-                                        );
+                                        ))),
+                                    );
 
-                                        self.playing_notes.insert(sound.clone());
-                                    }
+                                    self.playing_notes.insert(sound.clone());
                                 }
                                 let mut r = create_sound_block(row, piano_roll_bar_height, sound);
                                 r = r.translate(rect.min.to_vec2());
 
                                 let mut color = Color32::RED;
-                                if let Some(pointer_pos) = response.interact_pointer_pos() {
-                                    if response.drag_started()
-                                        && r.contains(pointer_pos)
-                                        && ui.rect_contains_pointer(r)
-                                    {
-                                        self.selected = Some((
-                                            row,
-                                            col,
-                                            sound.clone(),
-                                            [pointer_pos.x - r.left(), pointer_pos.y - r.top()]
-                                                .into(),
-                                        ));
-                                        to_be_deleted.push((row, col));
-                                    }
+                                if let Some(pointer_pos) = response.interact_pointer_pos()
+                                    && response.drag_started()
+                                    && r.contains(pointer_pos)
+                                    && ui.rect_contains_pointer(r)
+                                {
+                                    self.selected = Some((
+                                        row,
+                                        col,
+                                        sound.clone(),
+                                        [pointer_pos.x - r.left(), pointer_pos.y - r.top()].into(),
+                                    ));
+                                    to_be_deleted.push((row, col));
                                 };
-                                if let Some(pointer_pos) = response.hover_pos() {
-                                    if response.hovered()
-                                        && r.contains(pointer_pos)
-                                        && ui.rect_contains_pointer(r)
-                                    {
-                                        color = Color32::LIGHT_RED;
-                                    }
+                                if let Some(pointer_pos) = response.hover_pos()
+                                    && response.hovered()
+                                    && r.contains(pointer_pos)
+                                    && ui.rect_contains_pointer(r)
+                                {
+                                    color = Color32::LIGHT_RED;
                                 }
                                 ui.painter().rect_filled(r, 2.0, color);
                             }

@@ -1,6 +1,7 @@
 struct CameraUniform {
     view_pos: vec4<f32>,
-    view_proj: mat4x4<f32>,
+    proj: mat4x4<f32>,
+    view: mat4x4<f32>,
 }
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
@@ -51,7 +52,8 @@ fn vs_main(
 
     var output: VertexOutput;
 
-    output.position = camera.view_proj * vec4<f32>(
+    let view_proj = camera.proj * camera.view;
+    output.position = view_proj * vec4<f32>(
         particle.position.xyz + vec3<f32>(offset, 0.0),
         1.0
     );

@@ -1,6 +1,7 @@
 struct CameraUniform {
     view_pos: vec4<f32>,
-    view_proj: mat4x4<f32>,
+    proj: mat4x4<f32>,
+    view: mat4x4<f32>,
 }
 
 @group(0) @binding(0)
@@ -26,8 +27,8 @@ var diffuse_texture: texture_2d<f32>;
 @group(2) @binding(1)
 var diffuse_sampler: sampler;
 
-@group(3) @binding(0)
-var<storage, read> particles: array<u32>;
+//@group(3) @binding(0)
+//var<storage, read> particles: array<u32>;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -80,7 +81,9 @@ fn vs_main(
     let normal = normalize(rot * model.normal);
 
     var out: VertexOutput;
-    out.clip_position = camera.view_proj * world_pos;
+    let view_proj = camera.proj * camera.view;
+
+    out.clip_position = view_proj * world_pos;
     out.color = instance.color;
     out.world_normal = normal;
     out.world_position = world_pos.xyz;

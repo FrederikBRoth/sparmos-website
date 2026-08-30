@@ -2,7 +2,8 @@
 
 struct CameraUniform {
     view_pos: vec4<f32>,
-    view_proj: mat4x4<f32>,
+    proj: mat4x4<f32>,
+    view: mat4x4<f32>,
 }
 @group(0) @binding(0)
 var<uniform> camera: CameraUniform;
@@ -72,7 +73,8 @@ fn vs_main(
     out.color = instance.color;
     out.world_normal = normal;
     out.world_position = world_pos.xyz;
-    out.clip_position = camera.view_proj * world_pos;
+    let view_proj = camera.proj * camera.view;
+    out.clip_position = view_proj * world_pos;
     return out;
 }
 

@@ -752,15 +752,15 @@ impl CustomInterpolationEditor {
                         .map(|(i, _)| i);
                 }
 
-                if response.dragged() {
-                    if let Some(i) = bezier_editor.selected {
-                        let new_pos = egui::pos2(
-                            (pointer_pos.x - envelope.offset) / envelope.scale,
-                            pointer_pos.y,
-                        );
-                        pos[i] = new_pos;
-                        *changed = true;
-                    }
+                if response.dragged()
+                    && let Some(i) = bezier_editor.selected
+                {
+                    let new_pos = egui::pos2(
+                        (pointer_pos.x - envelope.offset) / envelope.scale,
+                        pointer_pos.y,
+                    );
+                    pos[i] = new_pos;
+                    *changed = true;
                 }
 
                 if response.drag_stopped() {

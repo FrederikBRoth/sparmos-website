@@ -2,6 +2,8 @@
 pub struct Boxes;
 #[derive(Debug)]
 pub struct Light;
+#[derive(Debug)]
+pub struct TestMarker;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]

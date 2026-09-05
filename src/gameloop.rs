@@ -20,21 +20,28 @@ use sparmos_engine::{
     cgmath::{self, *},
     core::{
         buffer::{Buffer, BufferType, UniformParameters},
+        engine::System,
         entities::World,
         geometry::{Primitive, Textured},
         instance::{DefaultInstanceLayout, Instance, InstanceTemplate},
         object_loading::model::Model,
         pbr::PhysicsBasedRenderingConstants,
+        physics::{
+            collision::{Aabb, Collider, Ray, ray_aabb},
+            rigidbody::{BodyType, RigidBody},
+        },
         post_processing::Effect,
         render::{ComputeRenderable, Renderable},
     },
     egui::{self, FontFamily, FontId, Id, TextStyle, Ui, pos2, vec2},
     entities::meshes::Meshes,
+    hecs::Entity,
     log,
     systems::{
         animation::{AnimationHandler, AnimationStep, AnimationType, Interpolation, StepState},
         camera::{Camera, CameraAnimator, CameraMode, CameraSystem, MovementKey, MovementPress},
         light::{Light, LightSystem},
+        physics::PhysicsSystem,
     },
     wgpu,
     winit::{
@@ -180,72 +187,79 @@ impl Website {
             mesh_handle: cube_mesh,
         };
 
-        gfx.add_entity((box_entity, markers::Boxes, animation_handler));
+        gfx.add_entity((
+            box_entity,
+            markers::Boxes,
+            animation_handler,
+            Collider::Box {
+                extents: vec3(1.0, 1.0, 1.0),
+            },
+        ));
 
-        let test: [u32; 8] = [2, 5, 1, 2, 3, 4, 6, 8];
-
-        let compute = gfx
-            .compute::<u32>()
-            .shader("compute")
-            .size(64)
-            .input_buffer(&test)
-            // .readback()
-            .build();
-
-        gfx.add_entity((compute,));
-        let particles = create_particles(128000);
-        let bounds = Bounds {
-            bounds: [100.0, 100.0, 100.0],
-            _padding: 0.0,
-        };
-        let compute2 = gfx
-            .compute::<Particle>()
-            .shader("particle")
-            .size(128000)
-            .initial_data(&particles)
-            .input_buffer(&[bounds])
-            .build();
-        gfx.add_entity((compute2,));
-
-        let compute_area = ComputeArea {
-            global_pos: [100.0, 100.0, -3.0],
-            rotation: [0.0, 0.0, 0.0, 1.0],
-            _padding: 0.0,
-        };
-        let particle_rendering = gfx
-            .compute_rendering(compute2)
-            .mesh::<Primitive>()
-            .input_data(&[compute_area])
-            .shader("particle_render_with_mesh")
-            .build();
-
-        let particle_renderable = ComputeRenderable {
-            rendering_handle: particle_rendering,
-            mesh_handle: cube_mesh,
-        };
-        gfx.add_entity((particle_renderable,));
-
-        let model_ic = gfx
-            .instances()
-            .from_instances(vec![Instance::new([2.0, 2.0, 1.0].into(), 100.0)])
-            .build();
-
-        let model_mat = gfx
-            .material::<Textured, DefaultInstanceLayout>()
-            .texture_from_color([0.5, 0.5, 0.5], "datboi")
-            .compute_buffer(compute)
-            .shader("textured")
-            .build();
-
-        let model = gfx
-            .model()
-            .model(include_bytes!("../DATBOI.obj"))
-            .material(include_bytes!("../DATBOI.mtl"))
-            .texture_pipeline(model_mat)
-            .instances(model_ic)
-            .build();
-
-        gfx.add_entity((model,));
+        // let test: [u32; 8] = [2, 5, 1, 2, 3, 4, 6, 8];
+        //
+        // let compute = gfx
+        //     .compute::<u32>()
+        //     .shader("compute")
+        //     .size(64)
+        //     .input_buffer(&test)
+        //     // .readback()
+        //     .build();
+        //
+        // gfx.add_entity((compute,));
+        // let particles = create_particles(128000);
+        // let bounds = Bounds {
+        //     bounds: [100.0, 100.0, 100.0],
+        //     _padding: 0.0,
+        // };
+        // let compute2 = gfx
+        //     .compute::<Particle>()
+        //     .shader("particle")
+        //     .size(128000)
+        //     .initial_data(&particles)
+        //     .input_buffer(&[bounds])
+        //     .build();
+        // gfx.add_entity((compute2,));
+        //
+        // let compute_area = ComputeArea {
+        //     global_pos: [100.0, 100.0, -3.0],
+        //     rotation: [0.0, 0.0, 0.0, 1.0],
+        //     _padding: 0.0,
+        // };
+        // let particle_rendering = gfx
+        //     .compute_rendering(compute2)
+        //     .mesh::<Primitive>()
+        //     .input_data(&[compute_area])
+        //     .shader("particle_render_with_mesh")
+        //     .build();
+        //
+        // let particle_renderable = ComputeRenderable {
+        //     rendering_handle: particle_rendering,
+        //     mesh_handle: cube_mesh,
+        // };
+        // gfx.add_entity((particle_renderable,));
+        //
+        // let model_ic = gfx
+        //     .instances()
+        //     .from_instances(vec![Instance::new([2.0, 2.0, 1.0].into(), 100.0)])
+        //     .build();
+        //
+        // let model_mat = gfx
+        //     .material::<Textured, DefaultInstanceLayout>()
+        //     .texture_from_color([0.5, 0.5, 0.5], "datboi", 1, 0)
+        //     .compute_buffer(compute, 2, 0)
+        //     .shader("textured")
+        //     .build();
+        //
+        // let model = gfx
+        //     .model()
+        //     .model(include_bytes!("../DATBOI.obj"))
+        //     .material(include_bytes!("../DATBOI.mtl"))
+        //     .texture_pipeline(model_mat)
+        //     .instances(model_ic)
+        //     .build();
+        //
+        // gfx.add_entity((model,));
         let castle = include_bytes!("../castle.vox");
         let chr_knight = include_bytes!("../chr_knight.vox");
         let rust_logo = include_bytes!("../rust.vox");
@@ -475,7 +489,7 @@ impl Game for Website {
     fn process_event(
         &mut self,
         event: &winit::event::WindowEvent,
-        _screen: &winit::dpi::PhysicalSize<u32>,
+        screen: &winit::dpi::PhysicalSize<u32>,
         gfx: &mut Graphics,
         world: Ref<'_, World>,
     ) {
@@ -635,7 +649,51 @@ impl Game for Website {
                 match button {
                     winit::event::MouseButton::Left => match state {
                         ElementState::Pressed => {}
-                        ElementState::Released => {}
+                        ElementState::Released => {
+                            let ndc_scale = gfx
+                                .engine
+                                .render_context
+                                .post_processing
+                                .display_to_render_ndc_scale();
+                            let mut test = None;
+                            world.query_first::<&Camera>(|camera| {
+                                test = Some(camera.screen_to_world_ray(
+                                    self.cursor_pos.x,
+                                    self.cursor_pos.y,
+                                    screen.width as f32,
+                                    screen.height as f32,
+                                    ndc_scale,
+                                ));
+                            });
+                            if let Some((position, direction)) = test {
+                                let ray = Ray {
+                                    direction,
+                                    origin: position,
+                                };
+
+                                let closest = ray.precise_intersects(&world, gfx);
+
+                                if let Some(hit) = closest {
+                                    let mut query =
+                                        world.entities.query_one::<(&Renderable, &markers::Boxes)>(
+                                            hit.entity_handle,
+                                        );
+
+                                    if let Ok((renderable, _)) = query.get() {
+                                        gfx.engine
+                                            .get_instance_controller(
+                                                &renderable.instance_controller_handle,
+                                            )
+                                            .instances_mut()
+                                            .get_mut(hit.instance_index)
+                                            .unwrap()
+                                            .should_render = false;
+                                    }
+                                }
+
+                                println!("{:?}", closest)
+                            }
+                        }
                     },
 
                     winit::event::MouseButton::Right => match state {
@@ -697,7 +755,7 @@ impl Game for Website {
         let camera_animater = CameraAnimator::new(0.75, camera.eye, camera.target);
 
         gfx.add_entity((camera, camera_animater));
-        gfx.add_system(camera_system);
+        gfx.add_system(System::gpu_bindable(camera_system));
 
         //Initiates lighting
         let light = Light {
@@ -715,7 +773,10 @@ impl Game for Website {
             &[light.clone(), light2.clone()],
             &gfx.engine.render_context.device,
         );
-        gfx.add_system(light_system);
+        gfx.add_system(System::gpu_bindable(light_system));
+
+        let physics_system = PhysicsSystem::new(vec3(0.0, -9.81, 0.0));
+        gfx.add_system(System::default(physics_system));
 
         //Initiate Shaders
         gfx.shader("lights", include_str!("shaders/lights.wgsl"));
@@ -820,8 +881,8 @@ impl Game for Website {
             .material::<Textured, DefaultInstanceLayout>()
             .shader("pbr_textured")
             // .texture_from_color([0.0, 1.0, 0.0])
-            .texture(texture)
-            .texture(ibl_maps.clone())
+            .texture(&texture, 1, 0)
+            .texture(&ibl_maps, 2, 0)
             .build();
 
         let sphere_ic = gfx.instances().build();
@@ -830,7 +891,7 @@ impl Game for Website {
             instance_controller_handle: sphere_ic,
             mesh_handle: sphere_mesh,
         };
-        gfx.add_entity((sphere_entity,));
+        gfx.add_entity((sphere_entity, Collider::Sphere { radius: 1.0 }));
         let texture2 = gfx
             .pbr_texture("sphere1")
             .diffuse_bytes(
@@ -858,8 +919,8 @@ impl Game for Website {
             .material::<Textured, DefaultInstanceLayout>()
             .shader("pbr_textured")
             // .texture_from_color([0.0, 1.0, 0.0])
-            .texture(texture2)
-            .texture(ibl_maps.clone())
+            .texture(&texture2, 1, 0)
+            .texture(&ibl_maps, 2, 0)
             .build();
 
         let sphere_ic2 = gfx.instances().origin(vec3(30.0, 30.0, 0.0)).build();
@@ -868,7 +929,7 @@ impl Game for Website {
             instance_controller_handle: sphere_ic2,
             mesh_handle: sphere_mesh,
         };
-        gfx.add_entity((sphere_entity2,));
+        gfx.add_entity((sphere_entity2, Collider::Sphere { radius: 1.0 }));
 
         let texture = gfx
             .pbr_texture("sphere3")
@@ -897,8 +958,8 @@ impl Game for Website {
             .material::<Textured, DefaultInstanceLayout>()
             .shader("pbr_textured")
             // .texture_from_color([0.0, 1.0, 0.0])
-            .texture(texture)
-            .texture(ibl_maps.clone())
+            .texture(&texture, 1, 0)
+            .texture(&ibl_maps, 2, 0)
             .build();
 
         let sphere_ic = gfx.instances().origin(vec3(10.0, 10.0, 0.0)).build();
@@ -907,7 +968,102 @@ impl Game for Website {
             instance_controller_handle: sphere_ic,
             mesh_handle: sphere_mesh,
         };
-        gfx.add_entity((sphere_entity,));
+        gfx.add_entity((
+            sphere_entity,
+            Collider::Sphere { radius: 1.0 },
+            RigidBody::new(1.0, BodyType::Dynamic),
+        ));
+
+        for i in 0..1000 {
+            let random = rand::random::<f32>() + 9.0;
+
+            let increment = i as f32 + 30.0;
+
+            let sphere_ic = gfx
+                .instances()
+                .origin(vec3(random, increment, random))
+                .build();
+            let sphere_entity = Renderable {
+                material_handle: sphere_mat,
+                instance_controller_handle: sphere_ic,
+                mesh_handle: sphere_mesh,
+            };
+            gfx.add_entity((
+                sphere_entity,
+                Collider::Sphere { radius: 1.0 },
+                RigidBody::new(1.0, BodyType::Dynamic),
+            ));
+        }
+        let sphere_ic = gfx.instances().origin(vec3(9.9, 30.0, 0.0)).build();
+        let sphere_entity = Renderable {
+            material_handle: sphere_mat,
+            instance_controller_handle: sphere_ic,
+            mesh_handle: sphere_mesh,
+        };
+        gfx.add_entity((
+            sphere_entity,
+            Collider::Sphere { radius: 1.0 },
+            RigidBody::new(1.0, BodyType::Dynamic),
+        ));
+
+        let plane_mesh = Meshes::Plane
+            .create_textured()
+            .make_mb(&mut gfx.engine.render_context);
+        let plane_mat = gfx
+            .material::<Textured, DefaultInstanceLayout>()
+            .shader("textured")
+            .texture_from_color([0.0, 1.0, 0.0], "color", 1, 0)
+            .build();
+        let boundary_size = 50.0;
+        let wall_height = 50.0;
+
+        let mut add_plane = |position: [f32; 3], rotation| {
+            let ic = gfx
+                .instances()
+                .origin(position.into())
+                .rotation(rotation)
+                .scale(boundary_size)
+                .build();
+
+            let renderable = Renderable {
+                material_handle: plane_mat,
+                mesh_handle: plane_mesh,
+                instance_controller_handle: ic,
+            };
+
+            gfx.add_entity((
+                renderable,
+                Collider::Plane,
+                RigidBody::new(100.0, BodyType::Static),
+            ));
+        };
+
+        // Floor
+        add_plane([0.0, -50.0, 0.0], Quaternion::from_angle_x(Deg(0.0)));
+
+        // +Z wall
+        add_plane(
+            [0.0, 0.0, boundary_size],
+            Quaternion::from_angle_x(Deg(-90.0)),
+        );
+
+        // -Z wall -> normal points +Z
+        add_plane(
+            [0.0, 0.0, -boundary_size],
+            Quaternion::from_angle_x(Deg(90.0)),
+        );
+
+        // +X wall -> normal points -X
+        add_plane(
+            [boundary_size, 0.0, 0.0],
+            Quaternion::from_angle_z(Deg(90.0)),
+        );
+
+        // -X wall -> normal points +X
+        add_plane(
+            [-boundary_size, 0.0, 0.0],
+            Quaternion::from_angle_z(Deg(-90.0)),
+        );
 
         // let cubemap_texture = gfx.texture("cubemap").cubemap(include_bytes!(
         //     "../pbr_test/cubemaps/cubemap_sky_17-512x512.png"
@@ -928,7 +1084,7 @@ impl Game for Website {
         let model_ic = gfx
             .instances()
             .origin(vec3(10.0, 10.0, 10.0))
-            .scale(2000.0)
+            .scale(2.0)
             .build();
 
         // let model = gfx
@@ -938,15 +1094,15 @@ impl Game for Website {
         //     .instances(model_ic)
         //     .build();
         //
-        let model = Model::load_gltf(
+        let model = Model::load_glb(
             gfx,
-            include_bytes!("../objs/gltfs/tank/Oth97_CNO_Consul.glb"),
+            include_bytes!("../objs/gltfs/wolf/Wolf-Blender-2.82a.glb"),
             model_ic,
             sphere_mat,
         );
         gfx.add_entity((model,));
-        // self.initiate_playground(gfx, camera_speed);
-        // self.initiate_audio_playground(state);
+        self.initiate_playground(gfx, camera_speed);
+        self.initiate_audio_playground(state);
     }
 
     fn resize(&mut self, gfx: &mut Graphics, world: Ref<'_, World>) {

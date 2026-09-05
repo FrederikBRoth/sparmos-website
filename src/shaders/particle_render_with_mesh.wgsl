@@ -17,7 +17,7 @@ struct LightBlock {
     light_count: u32,
 };
 
-@group(1) @binding(0)
+@group(0) @binding(1)
 var<uniform> u_lights: LightBlock;
 
 struct ComputeArea {
@@ -25,14 +25,14 @@ struct ComputeArea {
     rotation: vec4<f32>,
 };
 
-@group(2) @binding(0)
+@group(1) @binding(0)
 var<uniform> compute_area: ComputeArea;
 
 struct Particle {
     position: vec4<f32>,
     velocity: vec4<f32>,
 };
-@group(3) @binding(0)
+@group(2) @binding(0)
 var<storage, read> particles: array<Particle>;
 
 struct VertexInput {

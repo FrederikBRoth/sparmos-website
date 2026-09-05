@@ -1,7 +1,7 @@
 use cgmath::{MetricSpace, Vector3};
 use dot_vox::load_bytes;
 use sparmos_engine::cgmath::{InnerSpace, Rotation3, Zero, vec3};
-use sparmos_engine::core::instance::Instance;
+use sparmos_engine::core::instance::{Instance, Transform};
 use sparmos_engine::systems::animation::{
     AnimationHandler, AnimationStep, Interpolation, StepState,
 };
@@ -454,17 +454,17 @@ pub fn instances_list_cube(chunk: Vector3<i32>, chunk_size: Vector3<i32>) -> Vec
             };
             let default_color = cgmath::Vector3::new(1.0, 1.0, 1.0);
             let default_size = cgmath::Vector3::new(1.0, 1.0, 1.0);
-            let default_bounding = default_size + position;
 
             Instance {
                 index: n as u32,
-                position,
-                rotation,
-                scale: 1.0,
+                transform: Transform {
+                    position,
+                    rotation,
+                    scale: 1.0,
+                },
                 should_render: true,
                 color: default_color,
                 size: default_size,
-                bounding: default_bounding,
             }
         })
         .collect::<Vec<_>>()

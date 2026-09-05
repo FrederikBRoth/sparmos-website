@@ -18,16 +18,16 @@ struct LightBlock {
     light_count: u32,
 }
 
-@group(1) @binding(0)
+@group(0) @binding(1)
 var<uniform> u_lights: LightBlock;
 
-@group(2) @binding(0)
+@group(1) @binding(0)
 var diffuse_texture: texture_2d<f32>;
 
-@group(2) @binding(1)
+@group(1) @binding(1)
 var diffuse_sampler: sampler;
 
-//@group(3) @binding(0)
+//@group(2) @binding(0)
 //var<storage, read> particles: array<u32>;
 
 struct VertexInput {

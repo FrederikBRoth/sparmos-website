@@ -31,7 +31,7 @@ use sparmos_engine::{
             rigidbody::{BodyType, RigidBody},
         },
         post_processing::Effect,
-        render::{ComputeRenderable, Renderable},
+        render::{ComputeRenderable, RenderableHandle},
     },
     egui::{self, FontFamily, FontId, Id, TextStyle, Ui, pos2, vec2},
     entities::meshes::Meshes,
@@ -181,11 +181,7 @@ impl Website {
             .shader("boxes")
             .build();
 
-        let box_entity = Renderable {
-            material_handle: box_mat,
-            instance_controller_handle: box_ic,
-            mesh_handle: cube_mesh,
-        };
+        let box_entity = gfx.add_renderable(box_mat, cube_mesh, box_ic);
 
         gfx.add_entity((
             box_entity,
@@ -365,11 +361,11 @@ impl Game for Website {
                 self.bad_apple.update_camera(camera);
             });
 
-            world.query_first::<(&Renderable, &mut AnimationHandler)>(|(render, ah)| {
+            world.query_first::<(&RenderableHandle, &mut AnimationHandler)>(|(render, ah)| {
                 self.voxel_handler
                     .transition_to_point_list(self.bad_apple.get_frame(), ah, 1.0);
 
-                gfx.change_shader(&render.material_handle, "lights");
+                gfx.change_renderable_shader(*render, "lights");
             });
             println!("Test");
 
@@ -383,10 +379,10 @@ impl Game for Website {
                 self.bad_apple.reset_camera(camera);
             });
 
-            world.query_first::<(&Renderable, &mut AnimationHandler)>(|(render, ah)| {
+            world.query_first::<(&RenderableHandle, &mut AnimationHandler)>(|(render, ah)| {
                 self.voxel_handler
                     .transition_to_point_list(self.bad_apple.get_frame(), ah, 1.0);
-                gfx.change_shader(&render.material_handle, "boxes");
+                gfx.change_renderable_shader(*render, "boxes");
             });
             self.bad_apple.toggle = false;
 
@@ -402,11 +398,9 @@ impl Game for Website {
             match transition.clone() {
                 VoxelObjects::Home => {}
                 _ => {
-                    world.query_first::<(&Renderable, &mut AnimationHandler)>(
+                    world.query_first::<(&RenderableHandle, &mut AnimationHandler)>(
                         |(renderable, ah)| {
-                            let ic = gfx
-                                .engine
-                                .get_instance_controller(&renderable.instance_controller_handle);
+                            let ic = gfx.get_instance_controller(*renderable);
                             ah.reset_instance_position_to_current_position(
                                 ic.instances_mut().as_mut(),
                             );
@@ -464,17 +458,17 @@ impl Game for Website {
             self.bad_apple.elapsed += gfx.dt().as_secs_f32();
 
             if self.bad_apple.elapsed >= target {
-                world.query_first::<(&Renderable, &mut AnimationHandler)>(|(renderable, ah)| {
-                    let ic = gfx
-                        .engine
-                        .get_instance_controller(&renderable.instance_controller_handle);
-                    ah.reset_instance_position_to_current_position(ic.instances_mut().as_mut());
-                    self.voxel_handler.transition_to_point_list(
-                        self.bad_apple.get_frame(),
-                        ah,
-                        1.0,
-                    );
-                });
+                world.query_first::<(&RenderableHandle, &mut AnimationHandler)>(
+                    |(renderable, ah)| {
+                        let ic = gfx.get_instance_controller(*renderable);
+                        ah.reset_instance_position_to_current_position(ic.instances_mut().as_mut());
+                        self.voxel_handler.transition_to_point_list(
+                            self.bad_apple.get_frame(),
+                            ah,
+                            1.0,
+                        );
+                    },
+                );
                 world.query_first::<&mut Camera>(|camera| {
                     log::warn!("{:?}", camera.eye.z);
                     self.bad_apple.update_camera(camera)
@@ -506,11 +500,9 @@ impl Game for Website {
                 KeyCode::Space => {}
                 KeyCode::PageUp => {
                     if state == &winit::event::ElementState::Pressed {
-                        world.query_first::<(&Renderable, &mut AnimationHandler)>(
+                        world.query_first::<(&RenderableHandle, &mut AnimationHandler)>(
                             |(render, ah)| {
-                                let ic = gfx
-                                    .engine
-                                    .get_instance_controller(&render.instance_controller_handle);
+                                let ic = gfx.get_instance_controller(*render);
                                 ah.reset_instance_position_to_current_position(ic.instances_mut());
                                 self.voxel_handler.transition_to_object(
                                     VoxelObjects::HandballBird,
@@ -536,17 +528,11 @@ impl Game for Website {
                     if state == &winit::event::ElementState::Pressed {
                         let mut query = world
                             .entities
-                            .query::<(&Renderable, &mut AnimationHandler)>();
+                            .query::<(&RenderableHandle, &mut AnimationHandler)>();
                         println!("query len: {}", query.iter().len());
                         let (render, ah) = query.iter().next().expect("No AH");
 
-                        let ic = gfx
-                            .engine
-                            .render_context
-                            .gpu_objects
-                            .instance_controllers
-                            .get_mut(render.instance_controller_handle)
-                            .unwrap();
+                        let ic = gfx.get_instance_controller(*render);
 
                         ah.reset_instance_position_to_current_position(ic.instances_mut().as_mut());
                         self.voxel_handler.transition_to_object(
@@ -555,7 +541,7 @@ impl Game for Website {
                             true,
                             1.0,
                         );
-                        gfx.change_shader(&render.material_handle, "boxes");
+                        gfx.change_renderable_shader(*render, "boxes");
                         println!("snake!l!");
                         gfx.engine
                             .audio_handler
@@ -571,16 +557,10 @@ impl Game for Website {
                     if state == &winit::event::ElementState::Pressed {
                         let mut query = world
                             .entities
-                            .query::<(&Renderable, &mut AnimationHandler)>();
+                            .query::<(&RenderableHandle, &mut AnimationHandler)>();
                         let (render, ah) = query.iter().next().expect("No AH");
 
-                        let ic = gfx
-                            .engine
-                            .render_context
-                            .gpu_objects
-                            .instance_controllers
-                            .get_mut(render.instance_controller_handle)
-                            .unwrap();
+                        let ic = gfx.get_instance_controller(*render);
 
                         ah.reset_instance_position_to_current_position(ic.instances_mut().as_mut());
                         self.voxel_handler.transition_to_point_list(
@@ -675,15 +655,14 @@ impl Game for Website {
 
                                 if let Some(hit) = closest {
                                     let mut query =
-                                        world.entities.query_one::<(&Renderable, &markers::Boxes)>(
-                                            hit.entity_handle,
-                                        );
+                                        world
+                                            .entities
+                                            .query_one::<(&RenderableHandle, &markers::Boxes)>(
+                                                hit.entity_handle,
+                                            );
 
-                                    if let Ok((renderable, _)) = query.get() {
-                                        gfx.engine
-                                            .get_instance_controller(
-                                                &renderable.instance_controller_handle,
-                                            )
+                                    if let Ok((render, _)) = query.get() {
+                                        gfx.get_instance_controller(*render)
                                             .instances_mut()
                                             .get_mut(hit.instance_index)
                                             .unwrap()
@@ -802,25 +781,6 @@ impl Game for Website {
             .create_primitive()
             .make_mb(&mut gfx.engine.render_context);
 
-        // let light_ic = gfx
-        //     .instances()
-        //     .from_instances(vec![
-        //         Instance::new([30.0, 30.0, 1.0].into(), 10.0),
-        //         Instance::new([-100.0, -100.0, 1.0].into(), 10.0),
-        //     ])
-        //     .build();
-        //
-        // let light_mat = gfx
-        //     .material::<Primitive, DefaultInstanceLayout>()
-        //     .shader("lights")
-        //     .build();
-        // let light_entity = Renderable {
-        //     material_handle: light_mat,
-        //     instance_controller_handle: light_ic,
-        //     mesh_handle: cube_mesh,
-        // };
-        // gfx.add_entity((light_entity, markers::Light));
-
         let sphere_mesh = Meshes::Sphere
             .create_textured()
             .make_mb(&mut gfx.engine.render_context);
@@ -886,11 +846,7 @@ impl Game for Website {
             .build();
 
         let sphere_ic = gfx.instances().build();
-        let sphere_entity = Renderable {
-            material_handle: sphere_mat,
-            instance_controller_handle: sphere_ic,
-            mesh_handle: sphere_mesh,
-        };
+        let sphere_entity = gfx.add_renderable(sphere_mat, sphere_mesh, sphere_ic);
         gfx.add_entity((sphere_entity, Collider::Sphere { radius: 1.0 }));
         let texture2 = gfx
             .pbr_texture("sphere1")
@@ -924,11 +880,7 @@ impl Game for Website {
             .build();
 
         let sphere_ic2 = gfx.instances().origin(vec3(30.0, 30.0, 0.0)).build();
-        let sphere_entity2 = Renderable {
-            material_handle: sphere_mat2,
-            instance_controller_handle: sphere_ic2,
-            mesh_handle: sphere_mesh,
-        };
+        let sphere_entity2 = gfx.add_renderable(sphere_mat2, sphere_mesh, sphere_ic2);
         gfx.add_entity((sphere_entity2, Collider::Sphere { radius: 1.0 }));
 
         let texture = gfx
@@ -962,50 +914,21 @@ impl Game for Website {
             .texture(&ibl_maps, 2, 0)
             .build();
 
-        let sphere_ic = gfx.instances().origin(vec3(10.0, 10.0, 0.0)).build();
-        let sphere_entity = Renderable {
-            material_handle: sphere_mat,
-            instance_controller_handle: sphere_ic,
-            mesh_handle: sphere_mesh,
-        };
-        gfx.add_entity((
-            sphere_entity,
-            Collider::Sphere { radius: 1.0 },
-            RigidBody::new(1.0, BodyType::Dynamic),
-        ));
-
-        for i in 0..1000 {
+        let mut sphere_instances = Vec::with_capacity(5002);
+        sphere_instances.push(Instance::new(vec3(10.0, 10.0, 0.0), 1.0));
+        for i in 0..3000 {
             let random = rand::random::<f32>() + 9.0;
-
-            let increment = i as f32 + 30.0;
-
-            let sphere_ic = gfx
-                .instances()
-                .origin(vec3(random, increment, random))
-                .build();
-            let sphere_entity = Renderable {
-                material_handle: sphere_mat,
-                instance_controller_handle: sphere_ic,
-                mesh_handle: sphere_mesh,
-            };
-            gfx.add_entity((
-                sphere_entity,
-                Collider::Sphere { radius: 1.0 },
-                RigidBody::new(1.0, BodyType::Dynamic),
-            ));
+            sphere_instances.push(Instance::new(vec3(random, i as f32 + 30.0, random), 1.0));
         }
-        let sphere_ic = gfx.instances().origin(vec3(9.9, 30.0, 0.0)).build();
-        let sphere_entity = Renderable {
-            material_handle: sphere_mat,
-            instance_controller_handle: sphere_ic,
-            mesh_handle: sphere_mesh,
-        };
-        gfx.add_entity((
-            sphere_entity,
+        sphere_instances.push(Instance::new(vec3(9.9, 30.0, 0.0), 1.0));
+        let sphere_ic = gfx.instances().from_instances(sphere_instances).build();
+        gfx.add_physics_entity(
+            sphere_mat,
+            sphere_mesh,
+            sphere_ic,
             Collider::Sphere { radius: 1.0 },
             RigidBody::new(1.0, BodyType::Dynamic),
-        ));
-
+        );
         let plane_mesh = Meshes::Plane
             .create_textured()
             .make_mb(&mut gfx.engine.render_context);
@@ -1017,27 +940,12 @@ impl Game for Website {
         let boundary_size = 50.0;
         let wall_height = 50.0;
 
+        let mut planes = Vec::with_capacity(5);
         let mut add_plane = |position: [f32; 3], rotation| {
-            let ic = gfx
-                .instances()
-                .origin(position.into())
-                .rotation(rotation)
-                .scale(boundary_size)
-                .build();
-
-            let renderable = Renderable {
-                material_handle: plane_mat,
-                mesh_handle: plane_mesh,
-                instance_controller_handle: ic,
-            };
-
-            gfx.add_entity((
-                renderable,
-                Collider::Plane,
-                RigidBody::new(100.0, BodyType::Static),
-            ));
+            let mut instance = Instance::new(position.into(), boundary_size);
+            instance.transform.rotation = rotation;
+            planes.push(instance);
         };
-
         // Floor
         add_plane([0.0, -50.0, 0.0], Quaternion::from_angle_x(Deg(0.0)));
 
@@ -1063,6 +971,14 @@ impl Game for Website {
         add_plane(
             [-boundary_size, 0.0, 0.0],
             Quaternion::from_angle_z(Deg(-90.0)),
+        );
+        let plane_ic = gfx.instances().from_instances(planes).build();
+        gfx.add_physics_entity(
+            plane_mat,
+            plane_mesh,
+            plane_ic,
+            Collider::Plane,
+            RigidBody::new(100.0, BodyType::Static),
         );
 
         // let cubemap_texture = gfx.texture("cubemap").cubemap(include_bytes!(

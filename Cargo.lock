@@ -403,6 +403,7 @@ checksum = "1a98d30140e3296250832bbaaff83b27dcd6fa3cc70fb6f1f3e5c9c0023b5317"
 dependencies = [
  "approx",
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -896,6 +897,24 @@ name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+
+[[package]]
+name = "er"
+version = "0.1.0"
+source = "git+https://github.com/Viterkim/er#0eeee745b0a8d4053e1abd08cf96d3dadda258ed"
+dependencies = [
+ "er-macros",
+]
+
+[[package]]
+name = "er-macros"
+version = "0.1.0"
+source = "git+https://github.com/Viterkim/er#0eeee745b0a8d4053e1abd08cf96d3dadda258ed"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
+]
 
 [[package]]
 name = "errno"
@@ -3288,6 +3307,7 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "env_logger",
+ "er",
  "fs_extra",
  "getrandom 0.3.4",
  "glob",
@@ -3304,6 +3324,8 @@ dependencies = [
  "pollster",
  "rand 0.9.5",
  "reqwest",
+ "serde",
+ "serde_json",
  "slotmap",
  "spin_sleep",
  "tobj",
@@ -3323,6 +3345,7 @@ dependencies = [
  "bytemuck",
  "console_error_panic_hook",
  "dot_vox",
+ "er",
  "getrandom 0.3.4",
  "rand 0.9.5",
  "sparmos-engine",

@@ -452,7 +452,7 @@ pub fn instances_list_cube(chunk: Vector3<i32>, chunk_size: Vector3<i32>) -> Vec
             } else {
                 cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(0.0))
             };
-            Instance::new(position, 1.0)
+            Instance::new(position, vec3(1.0, 1.0, 1.0))
         })
         .collect::<Vec<_>>()
 }

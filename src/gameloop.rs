@@ -5,9 +5,11 @@ use std::{
     vec,
 };
 
+use er::{Er, ErError, ErOption, ErResult};
 use rand::Rng;
 use sparmos_engine::{
     application::{
+        event_handler::{GenericEventContext, KeyboardEventContext},
         graphics::Graphics,
         gui_elements::tui::{TuiBorder, TuiPanel, TuiWindow, toggleable_tui_button},
         state::{Game, State, map_value},
@@ -17,29 +19,33 @@ use sparmos_engine::{
         midi::Midi,
         synth::{EnvelopeSegment, Sound, Waveform},
     },
-    cgmath::{self, *},
+    cgmath::{self, num_traits::ToPrimitive, *},
     core::{
+        assets::asset_loader::AssetManifest,
         buffer::{Buffer, BufferType, UniformParameters},
         engine::System,
         entities::World,
-        geometry::{Primitive, Textured},
-        instance::{DefaultInstanceLayout, Instance, InstanceTemplate},
-        object_loading::model::Model,
+        instance::{Instance, SpriteInstanceLayout},
+        models::model::Model,
         pbr::PhysicsBasedRenderingConstants,
         physics::{
-            collision::{Aabb, Collider, Ray, ray_aabb},
+            collision::{Collider, Ray},
             rigidbody::{BodyType, RigidBody},
         },
         post_processing::Effect,
-        render::{ComputeRenderable, RenderableHandle},
+        render::RenderableHandle,
+        sprites::{sprite::Sprite, sprite_loader::SpriteSheet},
+        texture::Texture,
     },
     egui::{self, FontFamily, FontId, Id, TextStyle, Ui, pos2, vec2},
     entities::meshes::Meshes,
-    hecs::Entity,
     log,
     systems::{
         animation::{AnimationHandler, AnimationStep, AnimationType, Interpolation, StepState},
-        camera::{Camera, CameraAnimator, CameraMode, CameraSystem, MovementKey, MovementPress},
+        camera::{
+            Camera, CameraAnimator, CameraMode, CameraProjection, CameraSystem, MovementKey,
+            MovementPress,
+        },
         light::{Light, LightSystem},
         physics::PhysicsSystem,
     },
@@ -56,7 +62,7 @@ use crate::{
     circular_buffer::CircularBuffer,
     easter_egg::EasterEgg,
     gui::sound_editor::{GuiState, Ratio, RatioHandle},
-    markers::{self, Bounds, ComputeArea, Particle},
+    markers::{self, Particle},
     transition::{CameraPositions, TransitionHandler},
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
 };
@@ -156,12 +162,12 @@ impl Website {
         ]
         .into();
         self.sounds = sounds;
-        let bad_apple = include_bytes!("../badapple.mid");
-        let bad_apple_parsed = Midi::load_midi(bad_apple);
+        let bad_apple = state.graphics.asset("badapple.mid");
+        let bad_apple_parsed = Midi::load_midi(&bad_apple);
         self.gui_context.piano_roll.midis.push(bad_apple_parsed);
 
-        let wii_midi = include_bytes!("../mii.mid");
-        let wii_parsed = Midi::load_midi(wii_midi);
+        let wii_midi = state.graphics.asset("mii.mid");
+        let wii_parsed = Midi::load_midi(&wii_midi);
         self.gui_context.piano_roll.midis.push(wii_parsed);
         self.gui_context.piano_roll.create_track_from_midi(0, 0);
     }
@@ -171,15 +177,12 @@ impl Website {
         let instances_len = instances.len();
         let animation_handler = AnimationHandler::new_from_instances(&instances, vec![]);
         let cube_mesh = Meshes::Cube
-            .create_primitive()
+            .create()
             .make_mb(&mut gfx.engine.render_context);
 
         let box_ic = gfx.instances().from_instances(instances).build();
 
-        let box_mat = gfx
-            .material::<Primitive, DefaultInstanceLayout>()
-            .shader("boxes")
-            .build();
+        let box_mat = gfx.material().shader("boxes").build();
 
         let box_entity = gfx.add_renderable(box_mat, cube_mesh, box_ic);
 
@@ -224,7 +227,7 @@ impl Website {
         // };
         // let particle_rendering = gfx
         //     .compute_rendering(compute2)
-        //     .mesh::<Primitive>()
+        //     .mesh::<Vertex>()
         //     .input_data(&[compute_area])
         //     .shader("particle_render_with_mesh")
         //     .build();
@@ -237,46 +240,40 @@ impl Website {
         //
         // let model_ic = gfx
         //     .instances()
-        //     .from_instances(vec![Instance::new([2.0, 2.0, 1.0].into(), 100.0)])
+        //     .from_instances(vec![Instance::new(
+        //         [2.0, 2.0, 1.0].into(),
+        //         vec3(100.0, 100.0, 100.0),
+        //     )])
         //     .build();
         //
         // let model_mat = gfx
-        //     .material::<Textured, DefaultInstanceLayout>()
+        //     .material()
         //     .texture_from_color([0.5, 0.5, 0.5], "datboi", 1, 0)
         //     .compute_buffer(compute, 2, 0)
         //     .shader("textured")
         //     .build();
         //
-        // let model = gfx
-        //     .model()
-        //     .model(include_bytes!("../DATBOI.obj"))
-        //     .material(include_bytes!("../DATBOI.mtl"))
-        //     .texture_pipeline(model_mat)
-        //     .instances(model_ic)
-        //     .build();
-        //
-        // gfx.add_entity((model,));
-        let castle = include_bytes!("../castle.vox");
-        let chr_knight = include_bytes!("../chr_knight.vox");
-        let rust_logo = include_bytes!("../rust.vox");
-        let c_plus_plus = include_bytes!("../cplusplus.vox");
-        let c_sharp = include_bytes!("../csharp.vox");
-        let docker = include_bytes!("../docker.vox");
-        let hb_fugl = include_bytes!("../hbfugl.vox");
-        let femo_snake = include_bytes!("../femoslangen.vox");
-        self.voxel_handler.add_voxel(castle, VoxelObjects::Castle);
+        let castle = gfx.asset("castle.vox");
+        let chr_knight = gfx.asset("chr_knight.vox");
+        let rust_logo = gfx.asset("rust.vox");
+        let c_plus_plus = gfx.asset("cplusplus.vox");
+        let c_sharp = gfx.asset("csharp.vox");
+        let docker = gfx.asset("docker.vox");
+        let hb_fugl = gfx.asset("hbfugl.vox");
+        let femo_snake = gfx.asset("femoslangen.vox");
+        self.voxel_handler.add_voxel(&castle, VoxelObjects::Castle);
         self.voxel_handler
-            .add_voxel(chr_knight, VoxelObjects::Viking);
-        self.voxel_handler.add_voxel(rust_logo, VoxelObjects::Rust);
+            .add_voxel(&chr_knight, VoxelObjects::Viking);
+        self.voxel_handler.add_voxel(&rust_logo, VoxelObjects::Rust);
         self.voxel_handler
-            .add_voxel(c_plus_plus, VoxelObjects::CPlusPLus);
-        self.voxel_handler.add_voxel(c_sharp, VoxelObjects::CSharp);
+            .add_voxel(&c_plus_plus, VoxelObjects::CPlusPLus);
+        self.voxel_handler.add_voxel(&c_sharp, VoxelObjects::CSharp);
         self.voxel_handler
-            .add_voxel(docker, VoxelObjects::Containerization);
+            .add_voxel(&docker, VoxelObjects::Containerization);
         self.voxel_handler
-            .add_voxel(hb_fugl, VoxelObjects::HandballBird);
+            .add_voxel(&hb_fugl, VoxelObjects::HandballBird);
         self.voxel_handler
-            .add_voxel(femo_snake, VoxelObjects::FemogfirsSlangen);
+            .add_voxel(&femo_snake, VoxelObjects::FemogfirsSlangen);
 
         for p in 0..instances_len {
             self.voxel_handler.current_cubes.push(p);
@@ -314,7 +311,7 @@ impl Website {
         .collect();
 
         //Bad Apple setup
-        let badapple_bin = include_bytes!("../pixels.bin");
+        let badapple_bin = gfx.asset("pixels.bin");
 
         // let pixels = vec![]
         let badapple = EasterEgg::new(
@@ -326,21 +323,158 @@ impl Website {
             badapple_bin.to_vec(),
             camera_speed,
         );
-        gfx.engine.render_context.post_processing.new_effect(
-            (
-                gfx.engine.render_context.config.width,
-                gfx.engine.render_context.config.height,
-            )
-                .into(),
-            gfx.engine.render_context.config.format,
-            Effect::ChromaticAberration,
-        );
+        gfx.post_process_effect(Effect::ChromaticAberration)
+            .unwrap();
         self.camera_transition_handler.transition_map = camera_transition;
         self.bad_apple = badapple;
+    }
+
+    fn physics_playground(&mut self, gfx: &mut Graphics, camera_speed: f32, ibl_maps: &Texture) {
+        let sphere_mesh = Meshes::Sphere
+            .create()
+            .make_mb(&mut gfx.engine.render_context);
+
+        let wood_diffuse = gfx.asset("pbr_test/viktors_peber/Wood_Planks_basecolor.png");
+        let wood_normal = gfx.asset("pbr_test/viktors_peber/Wood_Planks_normal.png");
+        let wood_metallic = gfx.asset("pbr_test/viktors_peber/viktor_peber_mettalic.png");
+        let wood_roughness = gfx.asset("pbr_test/viktors_peber/Wood_Planks_roughness.png");
+        let wood_ao = gfx.asset("pbr_test/viktors_peber/Wood_Planks_ambientocclusion.png");
+        let texture = gfx
+            .pbr_texture("sphere3")
+            .diffuse_bytes(&wood_diffuse, wgpu::TextureFormat::Rgba8UnormSrgb)
+            .normal_bytes(&wood_normal, wgpu::TextureFormat::Rgba8Unorm)
+            .metallic_bytes(&wood_metallic, wgpu::TextureFormat::Rgba8Unorm)
+            .roughness_bytes(&wood_roughness, wgpu::TextureFormat::Rgba8Unorm)
+            .ao_bytes(&wood_ao, wgpu::TextureFormat::Rgba8Unorm)
+            .build();
+        let sphere_mat = gfx
+            .material()
+            .shader("pbr_textured")
+            // .texture_from_color([0.0, 1.0, 0.0])
+            .texture(&texture, 1, 0)
+            .texture(ibl_maps, 2, 0)
+            .build();
+
+        let mut sphere_instances = Vec::with_capacity(5002);
+        sphere_instances.push(Instance::new(vec3(10.0, 10.0, 0.0), vec3(1.0, 1.0, 1.0)));
+        for i in 0..3000 {
+            let random = rand::random::<f32>() + 9.0;
+            sphere_instances.push(Instance::new(
+                vec3(random, i as f32 + 30.0, random),
+                vec3(1.0, 1.0, 1.0),
+            ));
+        }
+        sphere_instances.push(Instance::new(vec3(9.9, 30.0, 0.0), vec3(1.0, 1.0, 1.0)));
+        let sphere_ic = gfx.instances().from_instances(sphere_instances).build();
+        gfx.add_physics_entity(
+            sphere_mat,
+            sphere_mesh,
+            sphere_ic,
+            Collider::Sphere { radius: 1.0 },
+            RigidBody::new(1.0, BodyType::Dynamic),
+        );
+        let plane_mesh = Meshes::Plane
+            .create()
+            .make_mb(&mut gfx.engine.render_context);
+        let plane_mat = gfx
+            .material()
+            .shader("textured")
+            .texture_from_color([0.0, 1.0, 0.0], "color", 1, 0)
+            .build();
+        let boundary_size = 50.0;
+        let wall_height = 50.0;
+
+        let mut planes = Vec::with_capacity(5);
+        let mut add_plane = |position: [f32; 3], rotation| {
+            let mut instance =
+                Instance::new(position.into(), vec3(boundary_size, 1.0, boundary_size));
+            instance.transform.rotation = rotation;
+            planes.push(instance);
+        };
+        // Floor
+        add_plane([0.0, -50.0, 0.0], Quaternion::from_angle_x(Deg(0.0)));
+
+        // +Z wall
+        add_plane(
+            [0.0, 0.0, boundary_size],
+            Quaternion::from_angle_x(Deg(-90.0)),
+        );
+
+        // -Z wall -> normal points +Z
+        add_plane(
+            [0.0, 0.0, -boundary_size],
+            Quaternion::from_angle_x(Deg(90.0)),
+        );
+
+        // +X wall -> normal points -X
+        add_plane(
+            [boundary_size, 0.0, 0.0],
+            Quaternion::from_angle_z(Deg(90.0)),
+        );
+
+        // -X wall -> normal points +X
+        add_plane(
+            [-boundary_size, 0.0, 0.0],
+            Quaternion::from_angle_z(Deg(-90.0)),
+        );
+        let plane_ic = gfx.instances().from_instances(planes).build();
+        gfx.add_physics_entity(
+            plane_mat,
+            plane_mesh,
+            plane_ic,
+            Collider::Plane,
+            RigidBody::new(100.0, BodyType::Static),
+        );
     }
 }
 
 impl Game for Website {
+    fn assets(&self) -> AssetManifest {
+        AssetManifest::new().extend([
+            "shaders/lights.wgsl",
+            "shaders/boxes.wgsl",
+            "shaders/compute.wgsl",
+            "shaders/particle.wgsl",
+            "shaders/particle_render.wgsl",
+            "shaders/particle_render_with_mesh.wgsl",
+            "shaders/textured.wgsl",
+            "shaders/sprite.wgsl",
+            "shaders/sprite_screen.wgsl",
+            "pbr_test/cubemaps/solitude_night_4k.hdr",
+            "pbr_test/cubemaps/kloofendal_48d_partly_cloudy_puresky_4k.hdr",
+            "pbr_test/cubemaps/mealie_road_4k.hdr",
+            "pbr_test/cubemaps/historic_cloister_passage_4k.hdr",
+            "pbr_test/viktors_peber/HerringBone_INST_basecolor.PNG",
+            "pbr_test/viktors_peber/HerringBone_INST_normal.PNG",
+            "pbr_test/viktors_peber/viktor_peber_mettalic.png",
+            "pbr_test/viktors_peber/HerringBone_INST_roughness.PNG",
+            "pbr_test/viktors_peber/HerringBone_INST_ambientocclusion.PNG",
+            "pbr_test/rusted_metal/rustediron2_basecolor.png",
+            "pbr_test/rusted_metal/rustediron2_normal.png",
+            "pbr_test/rusted_metal/rustediron2_metallic.png",
+            "pbr_test/rusted_metal/rustediron2_roughness.png",
+            "pbr_test/rusted_metal/blank_ao_2048x2048.png",
+            "objs/sprites/test.json",
+            "objs/sprites/test.png",
+            "objs/gltfs/wolf/Wolf-Blender-2.82a.glb",
+            "badapple.mid",
+            "mii.mid",
+            "castle.vox",
+            "chr_knight.vox",
+            "rust.vox",
+            "cplusplus.vox",
+            "csharp.vox",
+            "docker.vox",
+            "hbfugl.vox",
+            "femoslangen.vox",
+            "pixels.bin",
+            "pbr_test/viktors_peber/Wood_Planks_basecolor.png",
+            "pbr_test/viktors_peber/Wood_Planks_normal.png",
+            "pbr_test/viktors_peber/Wood_Planks_roughness.png",
+            "pbr_test/viktors_peber/Wood_Planks_ambientocclusion.png",
+        ])
+    }
+
     fn update(&mut self, gfx: &mut Graphics, world: Ref<'_, World>) {
         // let mut camera_system = self.world.query::<&mut CameraSystem>();
         // let camera_system = camera_system.iter().next().unwrap();
@@ -356,7 +490,7 @@ impl Game for Website {
         if buffer_string == "badapple" && !self.bad_apple.toggle {
             world.query_first::<&mut Camera>(|camera| {
                 camera.set(MovementKey::RotateLeft, MovementPress::Override);
-                camera.set_camera_mode(CameraMode::AnimatedMode);
+                camera.set_camera_mode(CameraMode::Animated);
                 self.bad_apple.init_camera(camera);
                 self.bad_apple.update_camera(camera);
             });
@@ -375,7 +509,7 @@ impl Game for Website {
         if buffer_string == "ihatefun" && self.bad_apple.toggle {
             world.query_first::<&mut Camera>(|camera| {
                 camera.set(MovementKey::RotateLeft, MovementPress::NotPressed);
-                camera.set_camera_mode(CameraMode::FreeMode);
+                camera.set_camera_mode(CameraMode::Free);
                 self.bad_apple.reset_camera(camera);
             });
 
@@ -625,6 +759,7 @@ impl Game for Website {
 
                 _ => (),
             },
+
             WindowEvent::MouseInput { state, button, .. } => {
                 match button {
                     winit::event::MouseButton::Left => match state {
@@ -726,6 +861,7 @@ impl Game for Website {
         };
         camera.yaw = 25.0;
         camera.pitch = -1.4;
+        camera.projection = CameraProjection::Perspective;
         camera.update_camera(gfx.dt());
         camera.update_forward();
         let camera_speed = camera.speed;
@@ -758,31 +894,28 @@ impl Game for Website {
         gfx.add_system(System::default(physics_system));
 
         //Initiate Shaders
-        gfx.shader("lights", include_str!("shaders/lights.wgsl"));
-        gfx.shader("boxes", include_str!("shaders/boxes.wgsl"));
-
-        gfx.shader("compute", include_str!("shaders/compute.wgsl"));
-
-        gfx.shader("particle", include_str!("shaders/particle.wgsl"));
-        gfx.shader(
-            "particle_render",
-            include_str!("shaders/particle_render.wgsl"),
-        );
-
-        gfx.shader(
+        gfx.shader_asset("lights", "shaders/lights.wgsl").unwrap();
+        gfx.shader_asset("boxes", "shaders/boxes.wgsl").unwrap();
+        gfx.shader_asset("compute", "shaders/compute.wgsl").unwrap();
+        gfx.shader_asset("particle", "shaders/particle.wgsl")
+            .unwrap();
+        gfx.shader_asset("particle_render", "shaders/particle_render.wgsl")
+            .unwrap();
+        gfx.shader_asset(
             "particle_render_with_mesh",
-            include_str!("shaders/particle_render_with_mesh.wgsl"),
-        );
-
-        gfx.shader("textured", include_str!("shaders/textured.wgsl"));
+            "shaders/particle_render_with_mesh.wgsl",
+        )
+        .unwrap();
+        gfx.shader_asset("textured", "shaders/textured.wgsl")
+            .unwrap();
         //Initiate meshes
 
         let cube_mesh = Meshes::Cube
-            .create_primitive()
+            .create()
             .make_mb(&mut gfx.engine.render_context);
 
         let sphere_mesh = Meshes::Sphere
-            .create_textured()
+            .create()
             .make_mb(&mut gfx.engine.render_context);
 
         let pbr_constants = PhysicsBasedRenderingConstants {
@@ -798,244 +931,143 @@ impl Game for Website {
 
         gfx.register_buffer(buffer.clone(), "material_test");
 
-        let cubemap_texture = gfx.texture("cubemap").hdri_cubemap(include_bytes!(
-            "../pbr_test/cubemaps/historic_cloister_passage_4k.hdr"
-        ));
-        let ibl_maps = gfx.texture("ibl").ibl_maps(&cubemap_texture);
-        // let cubemap_irradiance = gfx
-        //     .texture("cubemap")
-        //     .hdri_irradiance_map(include_bytes!("../pbr_test/cubemaps/solitude_night_4k.hdr"));
+        let solitude = gfx.asset("pbr_test/cubemaps/solitude_night_4k.hdr");
+        let cubemap_texture = gfx.texture("cubemap").hdri_cubemap(&solitude);
 
-        // let cubemap_irradiance = gfx.texture("cubemap").hdri_irradiance_map(include_bytes!(
-        //     "../pbr_test/cubemaps/kloofendal_48d_partly_cloudy_puresky_4k.hdr"
-        // ));
-
-        // let cubemap_irradiance = gfx
-        //     .texture("cubemap")
-        //     .hdri_irradiance_map(include_bytes!("../pbr_test/cubemaps/mealie_road_4k.hdr"));
-
-        let texture = gfx
-            .pbr_texture("sphere2")
-            .diffuse_bytes(
-                include_bytes!("../pbr_test/viktors_peber/HerringBone_INST_basecolor.png"),
-                wgpu::TextureFormat::Rgba8UnormSrgb,
-            )
-            .normal_bytes(
-                include_bytes!("../pbr_test/viktors_peber/HerringBone_INST_normal.PNG"),
-                wgpu::TextureFormat::Rgba8Unorm,
-            )
-            .metallic_bytes(
-                include_bytes!("../pbr_test/viktors_peber/viktor_peber_mettalic.png"),
-                wgpu::TextureFormat::Rgba8Unorm,
-            )
-            .roughness_bytes(
-                include_bytes!("../pbr_test/viktors_peber/HerringBone_INST_roughness.png"),
-                wgpu::TextureFormat::Rgba8Unorm,
-            )
-            .ao_bytes(
-                include_bytes!("../pbr_test/viktors_peber/HerringBone_INST_ambientocclusion.png"),
-                wgpu::TextureFormat::Rgba8Unorm,
-            )
-            .build();
-        let sphere_mat = gfx
-            .material::<Textured, DefaultInstanceLayout>()
-            .shader("pbr_textured")
-            // .texture_from_color([0.0, 1.0, 0.0])
-            .texture(&texture, 1, 0)
-            .texture(&ibl_maps, 2, 0)
-            .build();
-
-        let sphere_ic = gfx.instances().build();
-        let sphere_entity = gfx.add_renderable(sphere_mat, sphere_mesh, sphere_ic);
-        gfx.add_entity((sphere_entity, Collider::Sphere { radius: 1.0 }));
-        let texture2 = gfx
-            .pbr_texture("sphere1")
-            .diffuse_bytes(
-                include_bytes!("../pbr_test/rusted_metal/rustediron2_basecolor.png"),
-                wgpu::TextureFormat::Rgba8UnormSrgb,
-            )
-            .normal_bytes(
-                include_bytes!("../pbr_test/rusted_metal/rustediron2_normal.png"),
-                wgpu::TextureFormat::Rgba8Unorm,
-            )
-            .metallic_bytes(
-                include_bytes!("../pbr_test/rusted_metal/rustediron2_metallic.png"),
-                wgpu::TextureFormat::Rgba8Unorm,
-            )
-            .roughness_bytes(
-                include_bytes!("../pbr_test/rusted_metal/rustediron2_roughness.png"),
-                wgpu::TextureFormat::Rgba8Unorm,
-            )
-            .ao_bytes(
-                include_bytes!("../pbr_test/rusted_metal/blank_ao_2048x2048.png"),
-                wgpu::TextureFormat::Rgba8Unorm,
-            )
-            .build();
-        let sphere_mat2 = gfx
-            .material::<Textured, DefaultInstanceLayout>()
-            .shader("pbr_textured")
-            // .texture_from_color([0.0, 1.0, 0.0])
-            .texture(&texture2, 1, 0)
-            .texture(&ibl_maps, 2, 0)
-            .build();
-
-        let sphere_ic2 = gfx.instances().origin(vec3(30.0, 30.0, 0.0)).build();
-        let sphere_entity2 = gfx.add_renderable(sphere_mat2, sphere_mesh, sphere_ic2);
-        gfx.add_entity((sphere_entity2, Collider::Sphere { radius: 1.0 }));
-
-        let texture = gfx
-            .pbr_texture("sphere3")
-            .diffuse_bytes(
-                include_bytes!("../pbr_test/viktors_peber/Wood_Planks_basecolor.png"),
-                wgpu::TextureFormat::Rgba8UnormSrgb,
-            )
-            .normal_bytes(
-                include_bytes!("../pbr_test/viktors_peber/Wood_Planks_normal.png"),
-                wgpu::TextureFormat::Rgba8Unorm,
-            )
-            .metallic_bytes(
-                include_bytes!("../pbr_test/viktors_peber/viktor_peber_mettalic.png"),
-                wgpu::TextureFormat::Rgba8Unorm,
-            )
-            .roughness_bytes(
-                include_bytes!("../pbr_test/viktors_peber/Wood_Planks_roughness.png"),
-                wgpu::TextureFormat::Rgba8Unorm,
-            )
-            .ao_bytes(
-                include_bytes!("../pbr_test/viktors_peber/Wood_Planks_ambientocclusion.png"),
-                wgpu::TextureFormat::Rgba8Unorm,
-            )
-            .build();
-        let sphere_mat = gfx
-            .material::<Textured, DefaultInstanceLayout>()
-            .shader("pbr_textured")
-            // .texture_from_color([0.0, 1.0, 0.0])
-            .texture(&texture, 1, 0)
-            .texture(&ibl_maps, 2, 0)
-            .build();
-
-        let mut sphere_instances = Vec::with_capacity(5002);
-        sphere_instances.push(Instance::new(vec3(10.0, 10.0, 0.0), 1.0));
-        for i in 0..3000 {
-            let random = rand::random::<f32>() + 9.0;
-            sphere_instances.push(Instance::new(vec3(random, i as f32 + 30.0, random), 1.0));
+        {
+            let world = gfx.get_world();
+            let mut world = world.borrow_mut();
+            gfx.add_skybox(&cubemap_texture, &mut world);
         }
-        sphere_instances.push(Instance::new(vec3(9.9, 30.0, 0.0), 1.0));
-        let sphere_ic = gfx.instances().from_instances(sphere_instances).build();
-        gfx.add_physics_entity(
-            sphere_mat,
-            sphere_mesh,
-            sphere_ic,
-            Collider::Sphere { radius: 1.0 },
-            RigidBody::new(1.0, BodyType::Dynamic),
-        );
-        let plane_mesh = Meshes::Plane
-            .create_textured()
-            .make_mb(&mut gfx.engine.render_context);
-        let plane_mat = gfx
-            .material::<Textured, DefaultInstanceLayout>()
-            .shader("textured")
-            .texture_from_color([0.0, 1.0, 0.0], "color", 1, 0)
-            .build();
-        let boundary_size = 50.0;
-        let wall_height = 50.0;
-
-        let mut planes = Vec::with_capacity(5);
-        let mut add_plane = |position: [f32; 3], rotation| {
-            let mut instance = Instance::new(position.into(), boundary_size);
-            instance.transform.rotation = rotation;
-            planes.push(instance);
-        };
-        // Floor
-        add_plane([0.0, -50.0, 0.0], Quaternion::from_angle_x(Deg(0.0)));
-
-        // +Z wall
-        add_plane(
-            [0.0, 0.0, boundary_size],
-            Quaternion::from_angle_x(Deg(-90.0)),
-        );
-
-        // -Z wall -> normal points +Z
-        add_plane(
-            [0.0, 0.0, -boundary_size],
-            Quaternion::from_angle_x(Deg(90.0)),
-        );
-
-        // +X wall -> normal points -X
-        add_plane(
-            [boundary_size, 0.0, 0.0],
-            Quaternion::from_angle_z(Deg(90.0)),
-        );
-
-        // -X wall -> normal points +X
-        add_plane(
-            [-boundary_size, 0.0, 0.0],
-            Quaternion::from_angle_z(Deg(-90.0)),
-        );
-        let plane_ic = gfx.instances().from_instances(planes).build();
-        gfx.add_physics_entity(
-            plane_mat,
-            plane_mesh,
-            plane_ic,
-            Collider::Plane,
-            RigidBody::new(100.0, BodyType::Static),
-        );
-
-        // let cubemap_texture = gfx.texture("cubemap").cubemap(include_bytes!(
-        //     "../pbr_test/cubemaps/cubemap_sky_17-512x512.png"
-        // ));
-
-        // let cubemap_texture = gfx
-        //     .texture("cubemap")
-        //     .hdri_cubemap(include_bytes!("../pbr_test/cubemaps/solitude_night_4k.hdr"));
-        // let cubemap_texture = gfx.texture("cubemap").hdri_cubemap(include_bytes!(
-        //     "../pbr_test/cubemaps/kloofendal_48d_partly_cloudy_puresky_4k.hdr"
-        // ));
-
-        // let cubemap_texture = gfx
-        //     .texture("cubemap")
-        //     .hdri_cubemap(include_bytes!("../pbr_test/cubemaps/mealie_road_4k.hdr"));
-        gfx.add_skybox(cubemap_texture);
-
         let model_ic = gfx
             .instances()
             .origin(vec3(10.0, 10.0, 10.0))
-            .scale(2.0)
+            .uniform_scale(2.0)
             .build();
 
-        // let model = gfx
-        //     .model()
-        //     .model(include_bytes!("../objs/Demo_track.obj"))
-        //     .primitive_pipeline(model_mat)
-        //     .instances(model_ic)
-        //     .build();
-        //
-        let model = Model::load_glb(
+        let sprite_json = gfx.asset("objs/sprites/test.json");
+        let sprite_png = gfx.asset("objs/sprites/test.png");
+        let sprite_sheet = SpriteSheet::from_bytes(gfx, &sprite_json, &sprite_png);
+
+        let sprite_sheet_texture =
+            gfx.engine.render_context.gpu_objects.textures[sprite_sheet.texture_handle].clone();
+
+        gfx.shader_asset("sprite", "shaders/sprite.wgsl").unwrap();
+        gfx.shader_asset("sprite_screen", "shaders/sprite_screen.wgsl")
+            .unwrap();
+        let sprite_material = gfx
+            .material_instance::<SpriteInstanceLayout>()
+            .texture(&sprite_sheet_texture, 1, 0)
+            .shader("sprite")
+            .build();
+        let screen_sprite_material = gfx
+            .material_instance::<SpriteInstanceLayout>()
+            .texture(&sprite_sheet_texture, 1, 0)
+            .shader("sprite_screen")
+            .build();
+
+        let handle = gfx.engine.resources.sprite_sheets.insert(sprite_sheet);
+
+        let _sprite = Sprite::new(
             gfx,
-            include_bytes!("../objs/gltfs/wolf/Wolf-Blender-2.82a.glb"),
-            model_ic,
-            sphere_mat,
+            handle,
+            "Bingo trolden.aseprite",
+            sprite_material,
+            [30.0, 0.0, 0.0].into(),
         );
-        gfx.add_entity((model,));
-        self.initiate_playground(gfx, camera_speed);
-        self.initiate_audio_playground(state);
+
+        let _sprite = Sprite::new(
+            gfx,
+            handle,
+            "Håndboldfuglen.aseprite",
+            sprite_material,
+            [31.5, 0.0, 0.0].into(),
+        );
+
+        let _sprite = Sprite::new(
+            gfx,
+            handle,
+            "85Slange.aseprite",
+            sprite_material,
+            [33.0, 0.0, 0.0].into(),
+        );
+
+        // let _screen_sprite = Sprite::new_screen_space(
+        //     gfx,
+        //     handle,
+        //     "Bingo trolden.aseprite",
+        //     screen_sprite_material,
+        //     [50.0, 70.0, 0.0].into(),
+        // );
+        //
+        // let _screen_sprite = Sprite::new_screen_space(
+        //     gfx,
+        //     handle,
+        //     "Håndboldfuglen.aseprite",
+        //     screen_sprite_material,
+        //     [125.0, 70.0, 0.0].into(),
+        // );
+        //
+        // let _screen_sprite = Sprite::new_screen_space(
+        //     gfx,
+        //     handle,
+        //     "85Slange.aseprite",
+        //     screen_sprite_material,
+        //     [210.0, 70.0, 0.0].into(),
+        // );
+
+        // let wolf = gfx.asset("objs/gltfs/wolf/Wolf-Blender-2.82a.glb");
+        // let model = Model::load_glb(gfx, &wolf, model_ic, sphere_mat);
+        // gfx.add_entity((model,));
+
+        gfx.new_scene("test_scene1", |gfx: &mut Graphics, world| {
+            let solitude =
+                gfx.asset("pbr_test/cubemaps/kloofendal_48d_partly_cloudy_puresky_4k.hdr");
+            let cubemap_texture = gfx.texture("cubemap1").hdri_cubemap(&solitude);
+
+            ball_setup(gfx, world, &cubemap_texture);
+        });
+        gfx.new_scene("test_scene2", |gfx: &mut Graphics, world| {
+            let solitude = gfx.asset("pbr_test/cubemaps/solitude_night_4k.hdr");
+            let cubemap_texture = gfx.texture("cubemap2").hdri_cubemap(&solitude);
+            ball_setup(gfx, world, &cubemap_texture);
+        });
+        gfx.new_scene("test_scene3", |gfx: &mut Graphics, world| {
+            let solitude = gfx.asset("pbr_test/cubemaps/mealie_road_4k.hdr");
+            let cubemap_texture = gfx.texture("cubemap3").hdri_cubemap(&solitude);
+            ball_setup(gfx, world, &cubemap_texture);
+        });
+        gfx.new_scene("test_scene4", |gfx: &mut Graphics, world| {
+            let solitude = gfx.asset("pbr_test/cubemaps/historic_cloister_passage_4k.hdr");
+            let cubemap_texture = gfx.texture("cubemap4").hdri_cubemap(&solitude);
+            ball_setup(gfx, world, &cubemap_texture);
+        });
+
+        state.event_registry.key(KeyCode::Digit1, switch_cubemap_1);
+
+        state.event_registry.key(KeyCode::Digit2, switch_cubemap_2);
+        state.event_registry.key(KeyCode::Digit3, switch_cubemap_3);
+        state.event_registry.key(KeyCode::Digit4, switch_cubemap_4);
+
+        // self.initiate_playground(gfx, camera_speed);
+        // self.initiate_audio_playground(state);
+        // self.physics_playground(gfx, camera_speed, &ibl_maps);
     }
 
     fn resize(&mut self, gfx: &mut Graphics, world: Ref<'_, World>) {
         let mut query = world.entities.query::<&mut Camera>();
         let camera = query.iter().next().expect("No camera found");
 
-        camera.aspect = gfx.engine.render_context.config.width as f32
-            / gfx.engine.render_context.config.height as f32;
+        camera.resize(PhysicalSize::new(
+            gfx.engine.render_context.config.width as f32,
+            gfx.engine.render_context.config.height as f32,
+        ));
         println!("{:?}", camera.aspect);
         let new_fov = map_value(camera.aspect, 0.8, 1.88, 25.0, 55.0);
         camera.fovy = new_fov;
     }
 
     fn gui_setup(&mut self, dt: std::time::Duration, gfx: &mut Graphics, ui: &mut Ui) {
-        //WARN: GUI DISABLED
-        // return;
-
         let mut visuals = egui::Visuals::dark();
 
         visuals.window_corner_radius = 0.0.into();
@@ -1139,6 +1171,88 @@ impl Game for Website {
             self.gui_context.bc.ui(ui, gfx, "material_test");
         })
     }
+}
+
+impl Website {}
+
+fn ball_setup(gfx: &mut Graphics, world: &mut World, cubemap_texture: &Texture) {
+    let sphere_mesh = Meshes::Sphere
+        .create()
+        .make_mb(&mut gfx.engine.render_context);
+
+    gfx.add_skybox(&cubemap_texture, world);
+    let ibl_maps = gfx.texture("ibl").ibl_maps(&cubemap_texture);
+
+    // let kloofendal = gfx.asset("pbr_test/cubemaps/kloofendal_48d_partly_cloudy_puresky_4k.hdr");
+    // let cubemap_irradiance = gfx.texture("cubemap").hdri_irradiance_map(&kloofendal);
+
+    let herring_diffuse = gfx.asset("pbr_test/viktors_peber/HerringBone_INST_basecolor.PNG");
+    let herring_normal = gfx.asset("pbr_test/viktors_peber/HerringBone_INST_normal.PNG");
+    let herring_metallic = gfx.asset("pbr_test/viktors_peber/viktor_peber_mettalic.png");
+    let herring_roughness = gfx.asset("pbr_test/viktors_peber/HerringBone_INST_roughness.PNG");
+    let herring_ao = gfx.asset("pbr_test/viktors_peber/HerringBone_INST_ambientocclusion.PNG");
+    let texture = gfx
+        .pbr_texture("sphere2")
+        .diffuse_bytes(&herring_diffuse, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .normal_bytes(&herring_normal, wgpu::TextureFormat::Rgba8Unorm)
+        .metallic_bytes(&herring_metallic, wgpu::TextureFormat::Rgba8Unorm)
+        .roughness_bytes(&herring_roughness, wgpu::TextureFormat::Rgba8Unorm)
+        .ao_bytes(&herring_ao, wgpu::TextureFormat::Rgba8Unorm)
+        .build();
+    let sphere_mat = gfx
+        .material()
+        .shader("pbr_textured")
+        // .texture_from_color([0.0, 1.0, 0.0])
+        .texture(&texture, 1, 0)
+        .texture(&ibl_maps, 2, 0)
+        .build();
+
+    let sphere_ic = gfx.instances().build();
+    let sphere_entity = gfx.add_renderable(sphere_mat, sphere_mesh, sphere_ic);
+    world.add_entity((sphere_entity, Collider::Sphere { radius: 1.0 }));
+    let rusted_diffuse = gfx.asset("pbr_test/rusted_metal/rustediron2_basecolor.png");
+    let rusted_normal = gfx.asset("pbr_test/rusted_metal/rustediron2_normal.png");
+    let rusted_metallic = gfx.asset("pbr_test/rusted_metal/rustediron2_metallic.png");
+    let rusted_roughness = gfx.asset("pbr_test/rusted_metal/rustediron2_roughness.png");
+    let rusted_ao = gfx.asset("pbr_test/rusted_metal/blank_ao_2048x2048.png");
+    let texture2 = gfx
+        .pbr_texture("sphere1")
+        .diffuse_bytes(&rusted_diffuse, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .normal_bytes(&rusted_normal, wgpu::TextureFormat::Rgba8Unorm)
+        .metallic_bytes(&rusted_metallic, wgpu::TextureFormat::Rgba8Unorm)
+        .roughness_bytes(&rusted_roughness, wgpu::TextureFormat::Rgba8Unorm)
+        .ao_bytes(&rusted_ao, wgpu::TextureFormat::Rgba8Unorm)
+        .build();
+    let sphere_mat2 = gfx
+        .material()
+        .shader("pbr_textured")
+        // .texture_from_color([0.0, 1.0, 0.0])
+        .texture(&texture2, 1, 0)
+        .texture(&ibl_maps, 2, 0)
+        .build();
+
+    let sphere_ic2 = gfx.instances().origin(vec3(3.0, 0.0, 0.0)).build();
+    let sphere_entity2 = gfx.add_renderable(sphere_mat2, sphere_mesh, sphere_ic2);
+    world.add_entity((sphere_entity2, Collider::Sphere { radius: 1.0 }));
+}
+
+fn switch_cubemap_1(_game: &mut Website, context: &mut KeyboardEventContext) {
+    let scene = context.gfx.scenes.scenes_lookup["test_scene1"];
+    context.gfx.scenes.current = scene;
+}
+
+fn switch_cubemap_2(_game: &mut Website, context: &mut KeyboardEventContext) {
+    let scene = context.gfx.scenes.scenes_lookup["test_scene2"];
+    context.gfx.scenes.current = scene;
+}
+
+fn switch_cubemap_3(_game: &mut Website, context: &mut KeyboardEventContext) {
+    let scene = context.gfx.scenes.scenes_lookup["test_scene3"];
+    context.gfx.scenes.current = scene;
+}
+fn switch_cubemap_4(_game: &mut Website, context: &mut KeyboardEventContext) {
+    let scene = context.gfx.scenes.scenes_lookup["test_scene4"];
+    context.gfx.scenes.current = scene;
 }
 
 pub fn create_particles(count: usize) -> Vec<Particle> {

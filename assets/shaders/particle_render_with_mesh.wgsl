@@ -1,5 +1,3 @@
-// Vertex shader
-
 struct CameraUniform {
     view_pos: vec4<f32>,
     proj: mat4x4<f32>,
@@ -22,17 +20,26 @@ struct LightBlock {
 @group(0) @binding(1)
 var<uniform> u_lights: LightBlock;
 
+struct ComputeArea {
+    global_pos: vec3<f32>,
+    rotation: vec4<f32>,
+};
+
+@group(1) @binding(0)
+var<uniform> compute_area: ComputeArea;
+
+struct Particle {
+    position: vec4<f32>,
+    velocity: vec4<f32>,
+};
+@group(2) @binding(0)
+var<storage, read> particles: array<Particle>;
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) color: vec3<f32>,
     @location(2) normal: vec3<f32>,
 }
-struct InstanceInput {
-    @location(5) position: vec3<f32>,
-    @location(6) scale: vec3<f32>,
-    @location(7) rotation: vec4<f32>,
-    @location(8) color: vec3<f32>,
-};
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -44,47 +51,28 @@ struct VertexOutput {
 @vertex
 fn vs_main(
     model: VertexInput,
-    instance: InstanceInput,
+    @builtin(instance_index) instance_index: u32,
 ) -> VertexOutput {
-    let position = instance.position;
-    let scale = instance.scale;
-    let scale_sign = select(
-        vec3<f32>(-1.0),
-        vec3<f32>(1.0),
-        scale >= vec3<f32>(0.0),
-    );
-    let safe_scale = scale_sign * max(abs(scale), vec3<f32>(0.000001));
 
-    let rot = quat_to_mat3(instance.rotation);
+    let particle = particles[instance_index];
 
-    // apply scale
-    let rot_scaled = mat3x3<f32>(
-        rot[0] * scale.x,
-        rot[1] * scale.y,
-        rot[2] * scale.z,
-    );
+    let local_pos = model.position + particle.position.xyz;
+    let rotated_pos = quat_rotate(compute_area.rotation, local_pos);
 
-    // build full model matrix
-    let model_matrix = mat4x4<f32>(
-        vec4<f32>(rot_scaled[0], 0.0),
-        vec4<f32>(rot_scaled[1], 0.0),
-        vec4<f32>(rot_scaled[2], 0.0),
-        vec4<f32>(position, 1.0),
-    );
-
-    let world_pos = model_matrix * vec4<f32>(model.position, 1.0);
-
-    let normal = normalize(rot * (model.normal / safe_scale));
+    let world_pos = rotated_pos + vec3<f32>(compute_area.global_pos);
+    // normal matrix = rotation only
     var out: VertexOutput;
-    out.color = instance.color;
-    out.world_normal = normal;
+    out.color = model.color;
+    out.world_normal = model.normal;
     out.world_position = world_pos.xyz;
     let view_proj = camera.proj * camera.view;
-    out.clip_position = view_proj * world_pos;
+    out.clip_position = view_proj * vec4<f32>(
+        world_pos,
+        1.0
+    );
     return out;
 }
 
-// Fragment shader
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let ambient_strength = 0.05;
@@ -122,21 +110,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(result, 1.0);
 }
 
-fn quat_to_mat3(q: vec4<f32>) -> mat3x3<f32> {
-    let x = q.x;
-    let y = q.y;
-    let z = q.z;
-    let w = q.w;
+fn quat_rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    let q_xyz = q.xyz;
+    let t = 2.0 * cross(q_xyz, v);
 
-    return mat3x3<f32>(
-        1.0 - 2.0 * (y * y + z * z),
-        2.0 * (x * y + z * w),
-        2.0 * (x * z - y * w),
-        2.0 * (x * y - z * w),
-        1.0 - 2.0 * (x * x + z * z),
-        2.0 * (y * z + x * w),
-        2.0 * (x * z + y * w),
-        2.0 * (y * z - x * w),
-        1.0 - 2.0 * (x * x + y * y)
-    );
+    return v + q.w * t + cross(q_xyz, t);
 }

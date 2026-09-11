@@ -1,3 +1,4 @@
+const PI: f32 = 3.141592653589793;
 struct CameraUniform {
     view_pos: vec4<f32>,
     proj: mat4x4<f32>,
@@ -27,8 +28,14 @@ var diffuse_texture: texture_2d<f32>;
 @group(1) @binding(1)
 var diffuse_sampler: sampler;
 
-//@group(2) @binding(0)
-//var<storage, read> particles: array<u32>;
+struct PhysicsBasedRenderingConstants {
+    metallic: f32,
+    roughness: f32,
+    ao: f32,
+}
+
+@group(2) @binding(0)
+var<uniform> pbr_constants: PhysicsBasedRenderingConstants;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -88,7 +95,6 @@ fn vs_main(
 
     var out: VertexOutput;
     let view_proj = camera.proj * camera.view;
-
     out.clip_position = view_proj * world_pos;
     out.color = instance.color;
     out.world_normal = normal;
@@ -106,17 +112,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         in.uv,
     ).rgb;
 
-    // Texture is tinted by instance color
-    let albedo = texture_color * in.color;
-
-    let ambient_strength = 0.05;
-    let specular_strength = 0.2;
-    let shininess = 32.0;
-
     let N = normalize(in.world_normal);
     let V = normalize(camera.view_pos.xyz - in.world_position);
 
-    var result: vec3<f32> = vec3<f32>(0.0);
+    var f0 = vec3<f32>(0.04);
+    f0 = mix(f0, texture_color, pbr_constants.metallic);
+    var lo: vec3<f32> = vec3<f32>(0.0);
 
     for (var i: u32 = 0u; i < u_lights.light_count; i = i + 1u) {
         let light = u_lights.lights[i];
@@ -124,34 +125,38 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let L = normalize(light.position - in.world_position);
         let H = normalize(V + L);
 
-        // Ambient
-        let ambient = ambient_strength
-            * albedo
-            * light.color;
+        let ndotl = max(dot(N, L), 0.0);
+        let distance = length(light.position - in.world_position);
+        let attenuation = 1.0 / (distance * distance);
+        let radiance = light.color * light.intensity * attenuation;
 
-        // Diffuse
-        let diff = max(dot(N, L), 0.0);
-        let diffuse = diff
-            * albedo
-            * light.color;
+        //full Cook-Torrance specular calculation
+        //Surface reflection if looking directly at the material. This is different per material (think metals, plastic etc)
+        //Should be changed based on that. we go for a constant
+        let f = fresnel_schlick(max(dot(H, V), 0.0), f0);
 
-        // Specular
-        let spec = pow(
-            max(dot(N, H), 0.0),
-            shininess,
-        );
+        let ndf = distribution_ggx(N, H, pbr_constants.roughness);
+        let g = geometry_smith(N, V, L, pbr_constants.roughness);
 
-        let specular = specular_strength
-            * spec
-            * light.color;
+        let numerator = ndf * g * f;
+        let denominator = 4.0 * max(dot(N, V), 0.0) * ndotl + 0.0001;
+        let specular = numerator / denominator;
 
-        result += ambient + diffuse + specular;
+        let kS = f;
+        var kD = vec3<f32>(1.0) - kS;
+        kD = kD * (1.0 - pbr_constants.metallic);
+
+        lo += (kD * texture_color / PI + specular) * radiance * ndotl;
     }
 
     // Tone mapping
-    result = result / (result + vec3<f32>(1.0));
+    let ambient = vec3<f32>(0.03) * pbr_constants.ao * texture_color;
+    var color = ambient + lo;
 
-    return vec4<f32>(result, 1.0);
+    color = color / (color + vec3<f32>(1.0));
+    color = pow(color, vec3<f32>(1.0 / 2.2));
+
+    return vec4<f32>(color, 1.0);
 }
 
 fn quat_to_mat3(q: vec4<f32>) -> mat3x3<f32> {
@@ -171,4 +176,47 @@ fn quat_to_mat3(q: vec4<f32>) -> mat3x3<f32> {
         2.0 * (y * z - x * w),
         1.0 - 2.0 * (x * x + y * y),
     );
+}
+
+//Cook-Torrance BRDF(bidirectional reflective distribution function) 
+//functions. BRDF scales incomming radiance based on the surfaces material proper
+//ties
+//
+//Normal distribution function, D
+fn distribution_ggx(n: vec3<f32>, h: vec3<f32>, roughness: f32) -> f32 {
+    let a = roughness * roughness;
+    let a2 = a * a;
+    let ndoth = max(dot(n, h), 0.0);
+    let ndoth2 = ndoth * ndoth;
+    let nom = a2;
+    var denom = (ndoth2 * (a2 - 1.0) + 1.0);
+    denom = PI * denom * denom;
+
+    return nom / denom;
+}
+
+//Geometry function, G. Roughness essentially
+fn geometry_schlick_ggx(ndotv: f32, roughness: f32) -> f32 {
+    let r = (roughness + 1.0);
+    let k = (r * r) / 8.0;
+    let nom = ndotv;
+    let denom = ndotv * (1.0 - k) + k;
+
+    return nom / denom;
+}
+
+fn geometry_smith(n: vec3<f32>, v: vec3<f32>, l: vec3<f32>, roughness: f32) -> f32 {
+    let ndotv = max(dot(n, v), 0.0);
+    let ndotl = max(dot(n, l), 0.0);
+    let ggx1 = geometry_schlick_ggx(ndotv, roughness);
+    let ggx2 = geometry_schlick_ggx(ndotl, roughness);
+
+    return ggx1 * ggx2;
+}
+
+//Fresnell, Fr. Essentially calculating the angly reflection for when you are looking 
+//at material straight at it (90 degrees) or parallel
+
+fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
+    return f0 + (1.0 - f0) * pow(1.0 - cos_theta, 5.0);
 }

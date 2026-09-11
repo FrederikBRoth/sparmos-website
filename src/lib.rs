@@ -6,11 +6,17 @@ pub mod gui;
 pub mod markers;
 pub mod transition;
 pub mod voxel_builder;
+use er::Er;
+#[cfg(target_arch = "wasm32")]
+use er::ErResult;
+use sparmos_engine::log;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 // use app; // Removed because there is no external crate or module named 'app'
 
+#[derive(Er)]
+pub struct WasmError;
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(start)]
 pub fn run_web() -> Result<(), wasm_bindgen::JsValue> {
@@ -21,13 +27,17 @@ pub fn run_web() -> Result<(), wasm_bindgen::JsValue> {
     use sparmos_engine::prelude::run_game;
 
     console_error_panic_hook::set_once();
-    run_game::<WasmEvent, _, Website>(
+    match run_game::<WasmEvent, _, Website>(
         EventContainer {},
         Website {
             score: 0,
             ..Default::default()
         },
-    )
-    .unwrap_throw();
+    ) {
+        Ok(_) => {}
+        Err(err) => {
+            log::error!("{}", err.er_report())
+        }
+    }
     Ok(())
 }

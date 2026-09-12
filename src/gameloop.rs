@@ -25,6 +25,7 @@ use sparmos_engine::{
         buffer::{Buffer, BufferType, UniformParameters},
         engine::System,
         entities::World,
+        geometry::Vertex,
         instance::{Instance, SpriteInstanceLayout},
         models::model::Model,
         pbr::PhysicsBasedRenderingConstants,
@@ -33,7 +34,10 @@ use sparmos_engine::{
             rigidbody::{BodyType, RigidBody},
         },
         post_processing::Effect,
-        render::RenderableHandle,
+        render::{
+            render::{ComputeRenderable, RenderableHandle},
+            render_view::{RenderTarget, RenderViewRole},
+        },
         sprites::{sprite::Sprite, sprite_loader::SpriteSheet},
         texture::Texture,
     },
@@ -43,8 +47,7 @@ use sparmos_engine::{
     systems::{
         animation::{AnimationHandler, AnimationStep, AnimationType, Interpolation, StepState},
         camera::{
-            Camera, CameraAnimator, CameraMode, CameraProjection, CameraSystem, MovementKey,
-            MovementPress,
+            Camera, CameraAnimator, CameraMode, CameraProjection, MovementKey, MovementPress,
         },
         light::{Light, LightSystem},
         physics::PhysicsSystem,
@@ -62,7 +65,7 @@ use crate::{
     circular_buffer::CircularBuffer,
     easter_egg::EasterEgg,
     gui::sound_editor::{GuiState, Ratio, RatioHandle},
-    markers::{self, Particle},
+    markers::{self, Bounds, ComputeArea, Particle},
     transition::{CameraPositions, TransitionHandler},
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
 };
@@ -195,63 +198,63 @@ impl Website {
             },
         ));
 
-        // let test: [u32; 8] = [2, 5, 1, 2, 3, 4, 6, 8];
-        //
-        // let compute = gfx
-        //     .compute::<u32>()
-        //     .shader("compute")
-        //     .size(64)
-        //     .input_buffer(&test)
-        //     // .readback()
-        //     .build();
-        //
-        // gfx.add_entity((compute,));
-        // let particles = create_particles(128000);
-        // let bounds = Bounds {
-        //     bounds: [100.0, 100.0, 100.0],
-        //     _padding: 0.0,
-        // };
-        // let compute2 = gfx
-        //     .compute::<Particle>()
-        //     .shader("particle")
-        //     .size(128000)
-        //     .initial_data(&particles)
-        //     .input_buffer(&[bounds])
-        //     .build();
-        // gfx.add_entity((compute2,));
-        //
-        // let compute_area = ComputeArea {
-        //     global_pos: [100.0, 100.0, -3.0],
-        //     rotation: [0.0, 0.0, 0.0, 1.0],
-        //     _padding: 0.0,
-        // };
-        // let particle_rendering = gfx
-        //     .compute_rendering(compute2)
-        //     .mesh::<Vertex>()
-        //     .input_data(&[compute_area])
-        //     .shader("particle_render_with_mesh")
-        //     .build();
-        //
-        // let particle_renderable = ComputeRenderable {
-        //     rendering_handle: particle_rendering,
-        //     mesh_handle: cube_mesh,
-        // };
-        // gfx.add_entity((particle_renderable,));
-        //
-        // let model_ic = gfx
-        //     .instances()
-        //     .from_instances(vec![Instance::new(
-        //         [2.0, 2.0, 1.0].into(),
-        //         vec3(100.0, 100.0, 100.0),
-        //     )])
-        //     .build();
-        //
-        // let model_mat = gfx
-        //     .material()
-        //     .texture_from_color([0.5, 0.5, 0.5], "datboi", 1, 0)
-        //     .compute_buffer(compute, 2, 0)
-        //     .shader("textured")
-        //     .build();
+        let test: [u32; 8] = [2, 5, 1, 2, 3, 4, 6, 8];
+
+        let compute = gfx
+            .compute::<u32>()
+            .shader("compute")
+            .size(64)
+            .input_buffer(&test)
+            // .readback()
+            .build();
+
+        gfx.add_entity((compute,));
+        let particles = create_particles(128000);
+        let bounds = Bounds {
+            bounds: [100.0, 100.0, 100.0],
+            _padding: 0.0,
+        };
+        let compute2 = gfx
+            .compute::<Particle>()
+            .shader("particle")
+            .size(128000)
+            .initial_data(&particles)
+            .input_buffer(&[bounds])
+            .build();
+        gfx.add_entity((compute2,));
+
+        let compute_area = ComputeArea {
+            global_pos: [100.0, 100.0, -3.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            _padding: 0.0,
+        };
+        let particle_rendering = gfx
+            .compute_rendering(compute2)
+            .mesh::<Vertex>()
+            .input_data(&[compute_area])
+            .shader("particle_render_with_mesh")
+            .build();
+
+        let particle_renderable = ComputeRenderable {
+            rendering_handle: particle_rendering,
+            mesh_handle: cube_mesh,
+        };
+        gfx.add_entity((particle_renderable,));
+
+        let model_ic = gfx
+            .instances()
+            .from_instances(vec![Instance::new(
+                [2.0, 2.0, 1.0].into(),
+                vec3(100.0, 100.0, 100.0),
+            )])
+            .build();
+
+        let model_mat = gfx
+            .material()
+            .texture_from_color([0.5, 0.5, 0.5], "datboi", 1, 0)
+            .compute_buffer(compute, 2, 0)
+            .shader("textured")
+            .build();
         //
         let castle = gfx.asset("castle.vox");
         let chr_knight = gfx.asset("chr_knight.vox");
@@ -329,7 +332,7 @@ impl Website {
         self.bad_apple = badapple;
     }
 
-    fn physics_playground(&mut self, gfx: &mut Graphics, camera_speed: f32, ibl_maps: &Texture) {
+    fn physics_playground(gfx: &mut Graphics, camera_speed: f32, ibl_maps: &Texture) {
         let sphere_mesh = Meshes::Sphere
             .create()
             .make_mb(&mut gfx.engine.render_context);
@@ -840,20 +843,16 @@ impl Game for Website {
 
             _ => (),
         }
-        world.query_first::<&mut Camera>(|camera| {
-            camera.process_events(event);
-        });
     }
 
     fn setup(&mut self, state: &mut State) {
         let gfx = &mut state.graphics;
 
-        //Initiates Camera system
-        let mut camera = Camera::new(
-            PhysicalSize::new(state.size.width as f32, state.size.height as f32),
-            75.0,
-            50.0,
-        );
+        let main_scene = gfx.new_scene("test_scene1", |_gfx, _world| {});
+
+        // Initiate the main view. Its camera belongs to the view rather than the scene.
+        let main_target = RenderTarget::window(state.size);
+        let mut camera = Camera::new(main_target.clone(), 75.0, 50.0);
         camera.eye = Point3 {
             x: -17.16,
             y: 6.1,
@@ -865,12 +864,14 @@ impl Game for Website {
         camera.update_camera(gfx.dt());
         camera.update_forward();
         let camera_speed = camera.speed;
-        let camera_system = CameraSystem::new(gfx, &camera);
+        let main_view = gfx.new_render_view(
+            "main",
+            main_scene,
+            main_target.clone(),
+            RenderViewRole::Main,
+        );
 
-        let camera_animater = CameraAnimator::new(0.75, camera.eye, camera.target);
-
-        gfx.add_entity((camera, camera_animater));
-        gfx.add_system(System::gpu_bindable(camera_system));
+        gfx.render_views.get_render_view_mut(main_view).camera = camera;
 
         //Initiates lighting
         let light = Light {
@@ -888,10 +889,10 @@ impl Game for Website {
             &[light.clone(), light2.clone()],
             &gfx.engine.render_context.device,
         );
-        gfx.add_system(System::gpu_bindable(light_system));
+        gfx.add_system(System::view(light_system));
 
         let physics_system = PhysicsSystem::new(vec3(0.0, -9.81, 0.0));
-        gfx.add_system(System::default(physics_system));
+        gfx.add_system(System::scene(physics_system));
 
         //Initiate Shaders
         gfx.shader_asset("lights", "shaders/lights.wgsl").unwrap();
@@ -934,11 +935,13 @@ impl Game for Website {
         let solitude = gfx.asset("pbr_test/cubemaps/solitude_night_4k.hdr");
         let cubemap_texture = gfx.texture("cubemap").hdri_cubemap(&solitude);
 
-        {
-            let world = gfx.get_world();
-            let mut world = world.borrow_mut();
-            gfx.add_skybox(&cubemap_texture, &mut world);
-        }
+        let ibl_maps = gfx.texture("ibl").ibl_maps(&cubemap_texture);
+        Website::physics_playground(gfx, camera_speed, &ibl_maps);
+        // {
+        //     let world = gfx.get_world();
+        //     let mut world = world.borrow_mut();
+        //     gfx.add_skybox(&cubemap_texture, &mut world);
+        // }
         let model_ic = gfx
             .instances()
             .origin(vec3(10.0, 10.0, 10.0))
@@ -1020,13 +1023,13 @@ impl Game for Website {
         // let model = Model::load_glb(gfx, &wolf, model_ic, sphere_mat);
         // gfx.add_entity((model,));
 
-        gfx.new_scene("test_scene1", |gfx: &mut Graphics, world| {
+        {
             let solitude =
                 gfx.asset("pbr_test/cubemaps/kloofendal_48d_partly_cloudy_puresky_4k.hdr");
             let cubemap_texture = gfx.texture("cubemap1").hdri_cubemap(&solitude);
-
-            ball_setup(gfx, world, &cubemap_texture);
-        });
+            let world = gfx.world(main_scene);
+            ball_setup(gfx, &mut world.borrow_mut(), &cubemap_texture);
+        }
         gfx.new_scene("test_scene2", |gfx: &mut Graphics, world| {
             let solitude = gfx.asset("pbr_test/cubemaps/solitude_night_4k.hdr");
             let cubemap_texture = gfx.texture("cubemap2").hdri_cubemap(&solitude);
@@ -1037,12 +1040,34 @@ impl Game for Website {
             let cubemap_texture = gfx.texture("cubemap3").hdri_cubemap(&solitude);
             ball_setup(gfx, world, &cubemap_texture);
         });
-        gfx.new_scene("test_scene4", |gfx: &mut Graphics, world| {
+        let scene_handle = gfx.new_scene("test_scene4", |gfx: &mut Graphics, world| {
             let solitude = gfx.asset("pbr_test/cubemaps/historic_cloister_passage_4k.hdr");
             let cubemap_texture = gfx.texture("cubemap4").hdri_cubemap(&solitude);
+
             ball_setup(gfx, world, &cubemap_texture);
         });
 
+        let main_target = RenderTarget::window(state.size);
+        let mut camera = Camera::new(main_target.clone(), 75.0, 50.0);
+        camera.eye = Point3 {
+            x: -17.16,
+            y: 6.1,
+            z: -12.4,
+        };
+        camera.yaw = 30.0;
+        camera.pitch = -1.4;
+        camera.projection = CameraProjection::Perspective;
+        camera.update_camera(gfx.dt());
+        camera.update_forward();
+        let camera_speed = camera.speed;
+        let main_view = gfx.new_render_view(
+            "alternate",
+            scene_handle,
+            main_target.clone(),
+            RenderViewRole::Auxiliary,
+        );
+
+        gfx.render_views.get_render_view_mut(main_view).camera = camera;
         state.event_registry.key(KeyCode::Digit1, switch_cubemap_1);
 
         state.event_registry.key(KeyCode::Digit2, switch_cubemap_2);
@@ -1051,20 +1076,16 @@ impl Game for Website {
 
         // self.initiate_playground(gfx, camera_speed);
         // self.initiate_audio_playground(state);
-        // self.physics_playground(gfx, camera_speed, &ibl_maps);
     }
 
-    fn resize(&mut self, gfx: &mut Graphics, world: Ref<'_, World>) {
-        let mut query = world.entities.query::<&mut Camera>();
-        let camera = query.iter().next().expect("No camera found");
-
-        camera.resize(PhysicalSize::new(
-            gfx.engine.render_context.config.width as f32,
-            gfx.engine.render_context.config.height as f32,
-        ));
-        println!("{:?}", camera.aspect);
-        let new_fov = map_value(camera.aspect, 0.8, 1.88, 25.0, 55.0);
-        camera.fovy = new_fov;
+    fn resize(&mut self, gfx: &mut Graphics, _world: Ref<'_, World>) {
+        // let camera = &mut gfx
+        //     .render_views
+        //     .get_render_view_from_name_mut("main")
+        //     .camera;
+        // println!("{:?}", camera.aspect);
+        // let new_fov = map_value(camera.aspect, 0.8, 1.88, 25.0, 55.0);
+        // camera.fovy = new_fov;
     }
 
     fn gui_setup(&mut self, dt: std::time::Duration, gfx: &mut Graphics, ui: &mut Ui) {
@@ -1238,21 +1259,57 @@ fn ball_setup(gfx: &mut Graphics, world: &mut World, cubemap_texture: &Texture) 
 
 fn switch_cubemap_1(_game: &mut Website, context: &mut KeyboardEventContext) {
     let scene = context.gfx.scenes.scenes_lookup["test_scene1"];
-    context.gfx.scenes.current = scene;
+    context
+        .gfx
+        .render_views
+        .get_render_view_from_name_mut("main")
+        .scene = scene;
+    context.gfx.set_active_gameplay_scene(scene);
 }
 
 fn switch_cubemap_2(_game: &mut Website, context: &mut KeyboardEventContext) {
     let scene = context.gfx.scenes.scenes_lookup["test_scene2"];
-    context.gfx.scenes.current = scene;
+    context
+        .gfx
+        .render_views
+        .get_render_view_from_name_mut("main")
+        .scene = scene;
+    context.gfx.set_active_gameplay_scene(scene);
 }
 
 fn switch_cubemap_3(_game: &mut Website, context: &mut KeyboardEventContext) {
     let scene = context.gfx.scenes.scenes_lookup["test_scene3"];
-    context.gfx.scenes.current = scene;
+    let old_view = context
+        .gfx
+        .render_views
+        .get_render_view_from_name_mut("alternate");
+
+    old_view.role = RenderViewRole::Auxiliary;
+    let new_view = context
+        .gfx
+        .render_views
+        .get_render_view_from_name_mut("main");
+
+    new_view.role = RenderViewRole::Main;
+    new_view.scene = scene;
 }
 fn switch_cubemap_4(_game: &mut Website, context: &mut KeyboardEventContext) {
-    let scene = context.gfx.scenes.scenes_lookup["test_scene4"];
-    context.gfx.scenes.current = scene;
+    let old_view = context
+        .gfx
+        .render_views
+        .get_render_view_from_name_mut("main");
+
+    old_view.role = RenderViewRole::Auxiliary;
+    let new_view = context
+        .gfx
+        .render_views
+        .get_render_view_from_name_mut("alternate");
+
+    new_view.role = RenderViewRole::Main;
+
+    let scene_handle = new_view.scene.clone();
+
+    context.gfx.set_active_gameplay_scene(scene_handle);
 }
 
 pub fn create_particles(count: usize) -> Vec<Particle> {

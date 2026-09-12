@@ -38,6 +38,7 @@ use sparmos_engine::{
             render::{ComputeRenderable, RenderableHandle},
             render_view::{RenderTarget, RenderViewRole},
         },
+        scene::scene_handler::SceneHandle,
         sprites::{sprite::Sprite, sprite_loader::SpriteSheet},
         texture::Texture,
     },
@@ -332,7 +333,13 @@ impl Website {
         self.bad_apple = badapple;
     }
 
-    fn physics_playground(gfx: &mut Graphics, camera_speed: f32, ibl_maps: &Texture) {
+    fn physics_playground(
+        gfx: &mut Graphics,
+        camera_speed: f32,
+        ibl_maps: &Texture,
+        world: &mut World,
+        scene: SceneHandle,
+    ) {
         let sphere_mesh = Meshes::Sphere
             .create()
             .make_mb(&mut gfx.engine.render_context);
@@ -369,7 +376,9 @@ impl Website {
         }
         sphere_instances.push(Instance::new(vec3(9.9, 30.0, 0.0), vec3(1.0, 1.0, 1.0)));
         let sphere_ic = gfx.instances().from_instances(sphere_instances).build();
-        gfx.add_physics_entity(
+        gfx.add_physics_entity_to_scene_world(
+            scene,
+            world,
             sphere_mat,
             sphere_mesh,
             sphere_ic,
@@ -421,7 +430,9 @@ impl Website {
             Quaternion::from_angle_z(Deg(-90.0)),
         );
         let plane_ic = gfx.instances().from_instances(planes).build();
-        gfx.add_physics_entity(
+        gfx.add_physics_entity_to_scene_world(
+            scene,
+            world,
             plane_mat,
             plane_mesh,
             plane_ic,
@@ -848,7 +859,7 @@ impl Game for Website {
     fn setup(&mut self, state: &mut State) {
         let gfx = &mut state.graphics;
 
-        let main_scene = gfx.new_scene("test_scene1", |_gfx, _world| {});
+        let main_scene = gfx.new_scene("test_scene1", |_gfx, _world, _scene| {});
 
         // Initiate the main view. Its camera belongs to the view rather than the scene.
         let main_target = RenderTarget::window(state.size);
@@ -935,8 +946,8 @@ impl Game for Website {
         let solitude = gfx.asset("pbr_test/cubemaps/solitude_night_4k.hdr");
         let cubemap_texture = gfx.texture("cubemap").hdri_cubemap(&solitude);
 
-        let ibl_maps = gfx.texture("ibl").ibl_maps(&cubemap_texture);
-        Website::physics_playground(gfx, camera_speed, &ibl_maps);
+        // let ibl_maps = gfx.texture("ibl").ibl_maps(&cubemap_texture);
+        // Website::physics_playground(gfx, camera_speed, &ibl_maps);
         // {
         //     let world = gfx.get_world();
         //     let mut world = world.borrow_mut();
@@ -995,29 +1006,102 @@ impl Game for Website {
             [33.0, 0.0, 0.0].into(),
         );
 
-        // let _screen_sprite = Sprite::new_screen_space(
-        //     gfx,
-        //     handle,
-        //     "Bingo trolden.aseprite",
-        //     screen_sprite_material,
-        //     [50.0, 70.0, 0.0].into(),
-        // );
-        //
-        // let _screen_sprite = Sprite::new_screen_space(
-        //     gfx,
-        //     handle,
-        //     "Håndboldfuglen.aseprite",
-        //     screen_sprite_material,
-        //     [125.0, 70.0, 0.0].into(),
-        // );
-        //
-        // let _screen_sprite = Sprite::new_screen_space(
-        //     gfx,
-        //     handle,
-        //     "85Slange.aseprite",
-        //     screen_sprite_material,
-        //     [210.0, 70.0, 0.0].into(),
-        // );
+        let texture_size = PhysicalSize::new(1920, 1080);
+        let texture_format = gfx.engine.render_context.config.format;
+
+        let color_texture = gfx
+            .texture("texture_test_color")
+            .render_target(texture_size, texture_format)
+            .build();
+        let color_texture_handle = gfx.add_texture(color_texture.clone());
+        let depth_texture = gfx
+            .texture("texture_test_depth")
+            .depth_target(texture_size)
+            .build();
+        let depth_texture = gfx.add_texture(depth_texture);
+        let texture_target = RenderTarget::texture(
+            color_texture_handle,
+            0,
+            Some((depth_texture, 0)),
+            texture_size,
+            texture_format,
+        );
+        let mut camera = Camera::new(texture_target.clone(), 75.0, 50.0);
+        camera.eye = Point3 {
+            x: -17.16,
+            y: 6.1,
+            z: -12.4,
+        };
+        camera.yaw = 30.0;
+        camera.pitch = -1.4;
+        camera.projection = CameraProjection::Perspective;
+        camera.update_camera(gfx.dt());
+        camera.update_forward();
+        let texture_scene = gfx.new_scene("test_scene2", |gfx: &mut Graphics, world, scene| {
+            let solitude = gfx.asset("pbr_test/cubemaps/solitude_night_4k.hdr");
+            let cubemap_texture = gfx.texture("cubemap2").hdri_cubemap(&solitude);
+            let ibl_maps = gfx.texture("ibl").ibl_maps(&cubemap_texture);
+
+            let sphere_mesh = Meshes::Sphere
+                .create()
+                .make_mb(&mut gfx.engine.render_context);
+
+            gfx.add_skybox(&cubemap_texture, world);
+            Website::physics_playground(gfx, camera_speed, &ibl_maps, world, scene);
+        });
+
+        let mesh = Meshes::Sprite
+            .create()
+            .make_mb(&mut gfx.engine.render_context);
+
+        let instance_scale = Vector3::new(128.0, 72.0, 1.0);
+
+        let mut instance = Instance::new([0.0, 0.0, 0.0].into(), instance_scale);
+        instance.uv = [0.0, 0.0, 1.0, 1.0].into();
+        let instance_controller = gfx
+            .instances_typed::<SpriteInstanceLayout>()
+            .from_instances([instance].into())
+            .build();
+
+        let camera_material = gfx
+            .material_instance::<SpriteInstanceLayout>()
+            .texture(&color_texture, 1, 0)
+            .shader("sprite")
+            .build();
+        let renderable = gfx.add_renderable(camera_material, mesh, instance_controller);
+        gfx.add_entity((renderable,));
+
+        let texture_view = gfx.new_render_view(
+            "texture_test",
+            texture_scene,
+            texture_target,
+            RenderViewRole::Auxiliary,
+        );
+        gfx.render_views.get_render_view_mut(texture_view).camera = camera;
+
+        let _screen_sprite = Sprite::new_screen_space(
+            gfx,
+            handle,
+            "Bingo trolden.aseprite",
+            screen_sprite_material,
+            [50.0, 70.0, 0.0].into(),
+        );
+
+        let _screen_sprite = Sprite::new_screen_space(
+            gfx,
+            handle,
+            "Håndboldfuglen.aseprite",
+            screen_sprite_material,
+            [125.0, 70.0, 0.0].into(),
+        );
+
+        let _screen_sprite = Sprite::new_screen_space(
+            gfx,
+            handle,
+            "85Slange.aseprite",
+            screen_sprite_material,
+            [210.0, 70.0, 0.0].into(),
+        );
 
         // let wolf = gfx.asset("objs/gltfs/wolf/Wolf-Blender-2.82a.glb");
         // let model = Model::load_glb(gfx, &wolf, model_ic, sphere_mat);
@@ -1030,17 +1114,12 @@ impl Game for Website {
             let world = gfx.world(main_scene);
             ball_setup(gfx, &mut world.borrow_mut(), &cubemap_texture);
         }
-        gfx.new_scene("test_scene2", |gfx: &mut Graphics, world| {
-            let solitude = gfx.asset("pbr_test/cubemaps/solitude_night_4k.hdr");
-            let cubemap_texture = gfx.texture("cubemap2").hdri_cubemap(&solitude);
-            ball_setup(gfx, world, &cubemap_texture);
-        });
-        gfx.new_scene("test_scene3", |gfx: &mut Graphics, world| {
+        gfx.new_scene("test_scene3", |gfx: &mut Graphics, world, scene| {
             let solitude = gfx.asset("pbr_test/cubemaps/mealie_road_4k.hdr");
             let cubemap_texture = gfx.texture("cubemap3").hdri_cubemap(&solitude);
             ball_setup(gfx, world, &cubemap_texture);
         });
-        let scene_handle = gfx.new_scene("test_scene4", |gfx: &mut Graphics, world| {
+        let scene_handle = gfx.new_scene("test_scene4", |gfx: &mut Graphics, world, scene| {
             let solitude = gfx.asset("pbr_test/cubemaps/historic_cloister_passage_4k.hdr");
             let cubemap_texture = gfx.texture("cubemap4").hdri_cubemap(&solitude);
 
@@ -1068,6 +1147,7 @@ impl Game for Website {
         );
 
         gfx.render_views.get_render_view_mut(main_view).camera = camera;
+
         state.event_registry.key(KeyCode::Digit1, switch_cubemap_1);
 
         state.event_registry.key(KeyCode::Digit2, switch_cubemap_2);

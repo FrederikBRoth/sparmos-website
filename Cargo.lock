@@ -3347,6 +3347,8 @@ dependencies = [
  "dot_vox",
  "er",
  "getrandom 0.3.4",
+ "image",
+ "pollster",
  "rand 0.9.5",
  "sparmos-engine",
  "wasm-bindgen",

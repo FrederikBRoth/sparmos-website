@@ -5,29 +5,27 @@ use std::{
     vec,
 };
 
-use er::{Er, ErError, ErOption, ErResult};
 use rand::Rng;
 use sparmos_engine::{
     application::{
-        event_handler::{GenericEventContext, KeyboardEventContext},
+        event_handler::KeyboardEventContext,
         graphics::Graphics,
         gui_elements::tui::{TuiBorder, TuiPanel, TuiWindow, toggleable_tui_button},
-        state::{Game, State, map_value},
+        state::{Game, State},
     },
     audio::{
         audio_handler::{AudioCommand, AudioHandler, AudioTrigger, get_full_piano, pianokey_to_hz},
         midi::Midi,
         synth::{EnvelopeSegment, Sound, Waveform},
     },
-    cgmath::{self, num_traits::ToPrimitive, *},
+    cgmath::{self, *},
     core::{
         assets::asset_loader::AssetManifest,
         buffer::{Buffer, BufferType, UniformParameters},
         engine::System,
         entities::World,
         geometry::Vertex,
-        instance::{Instance, SpriteInstanceLayout},
-        models::model::Model,
+        instance::{Instance, SpriteInstanceLayout, Transform},
         pbr::PhysicsBasedRenderingConstants,
         physics::{
             collision::{Collider, Ray},
@@ -36,7 +34,10 @@ use sparmos_engine::{
         post_processing::Effect,
         render::{
             render::{ComputeRenderable, RenderableHandle},
-            render_view::{RenderTarget, RenderViewRole},
+            render_view::{
+                RenderLayer, RenderMask, RenderTarget, RenderViewHandle, RenderViewRole,
+                TextureRenderTargetConfig,
+            },
         },
         scene::scene_handler::SceneHandle,
         sprites::{sprite::Sprite, sprite_loader::SpriteSheet},
@@ -48,7 +49,8 @@ use sparmos_engine::{
     systems::{
         animation::{AnimationHandler, AnimationStep, AnimationType, Interpolation, StepState},
         camera::{
-            Camera, CameraAnimator, CameraMode, CameraProjection, MovementKey, MovementPress,
+            Camera, CameraAnimator, CameraMode, CameraProjection, ClipPlane, MovementKey,
+            MovementPress,
         },
         light::{Light, LightSystem},
         physics::PhysicsSystem,
@@ -71,6 +73,82 @@ use crate::{
     voxel_builder::{VoxelHandler, VoxelObjects, instances_list_cube},
 };
 
+const PORTAL_SURFACE_LAYER: RenderLayer = RenderLayer(1 << 1);
+
+struct PortalEndpoint {
+    scene: SceneHandle,
+    transform: Transform,
+    /// Renders the other endpoint's scene, sampled by this endpoint's surface.
+    view: RenderViewHandle,
+    surface: RenderableHandle,
+}
+
+pub struct PortalPlayground {
+    main_view: RenderViewHandle,
+    portal_a: PortalEndpoint,
+    portal_b: PortalEndpoint,
+}
+
+/// Portals use rigid transforms with local +Z pointing out of their front face.
+/// Aperture dimensions belong to the surface instance, never the portal transform.
+fn camera_through_portal(
+    source: &Camera,
+    from: &Transform,
+    to: &Transform,
+    target_size: PhysicalSize<u32>,
+) -> Camera {
+    assert_eq!(
+        from.scale,
+        vec3(1.0, 1.0, 1.0),
+        "scaled portals are unsupported"
+    );
+    assert_eq!(
+        to.scale,
+        vec3(1.0, 1.0, 1.0),
+        "scaled portals are unsupported"
+    );
+    let rotation = to.rotation * Quaternion::from_angle_y(Deg(180.0)) * from.rotation.conjugate();
+    let mut camera = *source;
+    camera.eye =
+        Point3::from_vec(to.position + rotation.rotate_vector(source.eye.to_vec() - from.position));
+    let forward = match (source.projection, source.camera_mode) {
+        (CameraProjection::OrthographicWorld { .. }, CameraMode::Free | CameraMode::Animated) => {
+            Vector3::unit_z()
+        }
+        (_, CameraMode::Free) => source.forward,
+        _ => (source.target - source.eye).normalize(),
+    };
+    camera.forward = rotation.rotate_vector(forward).normalize();
+    let up = if matches!(
+        source.projection,
+        CameraProjection::OrthographicWorld { .. }
+    ) && !matches!(source.camera_mode, CameraMode::Fixed)
+    {
+        Vector3::unit_y()
+    } else {
+        source.up
+    };
+    camera.up = rotation.rotate_vector(up).normalize();
+    camera.target = camera.eye + camera.forward;
+    camera.yaw = camera.forward.z.atan2(camera.forward.x).to_degrees();
+    camera.pitch = camera.forward.y.clamp(-1.0, 1.0).asin().to_degrees();
+    camera.camera_mode = CameraMode::Fixed;
+    camera.resize(PhysicalSize::new(
+        target_size.width as f32,
+        target_size.height as f32,
+    ));
+    camera
+}
+
+fn portal_exit_plane(transform: &Transform, eye: Point3<f32>) -> ClipPlane {
+    let mut normal = transform.rotation.rotate_vector(Vector3::unit_z());
+    // Support viewing either face. Keep the destination half-space beyond the exit.
+    if normal.dot(eye.to_vec() - transform.position) > 0.0 {
+        normal = -normal;
+    }
+    ClipPlane::from_point_normal(Point3::from_vec(transform.position + normal * 0.01), normal)
+}
+
 pub struct Website {
     pub score: u32,
     pub counter: usize,
@@ -82,6 +160,7 @@ pub struct Website {
     pub bad_apple: EasterEgg,
     pub gui_context: GuiState,
     pub sounds: Vec<Sound>,
+    pub portal_playground: Option<PortalPlayground>,
 }
 
 impl Default for Website {
@@ -97,11 +176,191 @@ impl Default for Website {
             bad_apple: EasterEgg::default(),
             gui_context: GuiState::default(),
             sounds: vec![],
+            portal_playground: None,
         }
     }
 }
 
 impl Website {
+    fn portal_playground(
+        gfx: &mut Graphics,
+        main_scene: SceneHandle,
+        main_view: RenderViewHandle,
+    ) -> PortalPlayground {
+        gfx.shader_asset("portal", "shaders/portal.wgsl").unwrap();
+        gfx.shader_asset("portal_world", "shaders/portal_world.wgsl")
+            .unwrap();
+        let destination_scene = gfx.new_scene("portal_destination", |_, _, _| {});
+        let transforms = [
+            Transform {
+                position: vec3(-6.3, 5.8, -7.34),
+                rotation: Quaternion::from_angle_y(Deg(-115.0)),
+                ..Default::default()
+            },
+            Transform {
+                position: vec3(10.0, 5.0, 10.0),
+                rotation: Quaternion::from_angle_y(Deg(35.0)) * Quaternion::from_angle_z(Deg(15.0)),
+                ..Default::default()
+            },
+        ];
+        let size = gfx
+            .render_views
+            .get_render_view(main_view)
+            .render_target
+            .size();
+        let source_camera = gfx.render_views.get_render_view(main_view).camera;
+        gfx.render_views.get_render_view_mut(main_view).camera.speed = 8.0;
+        let format = gfx.engine.render_context.config.format;
+        let surface_mesh = Meshes::Sprite
+            .create()
+            .make_mb(&mut gfx.engine.render_context);
+        let cube_mesh = Meshes::Cube
+            .create()
+            .make_mb(&mut gfx.engine.render_context);
+        let world_material = gfx.material().shader("portal_world").build();
+        let mut endpoints = Vec::new();
+        for (index, (scene, destination)) in [
+            (main_scene, destination_scene),
+            (destination_scene, main_scene),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let transform = transforms[index].clone();
+            let label = format!("portal_{}", index);
+            // Full resolution preserves the exact aspect ratio, including odd window sizes.
+            let target = gfx
+                .create_texture_render_target(&label, TextureRenderTargetConfig::new(size, format));
+            let texture = gfx.get_texture(target.color_texture().unwrap()).clone();
+            let camera =
+                camera_through_portal(&source_camera, &transform, &transforms[1 - index], size);
+            let view = gfx.new_render_view_with_camera(
+                &label,
+                destination,
+                target,
+                RenderViewRole::Auxiliary,
+                camera,
+            );
+            let render_view = gfx.render_views.get_render_view_mut(view);
+            render_view.simulate_camera = false;
+            render_view.render_mask = RenderMask(!PORTAL_SURFACE_LAYER.0);
+            render_view.clip_plane = Some(portal_exit_plane(&transforms[1 - index], camera.eye));
+            let material = gfx
+                .material()
+                .texture(&texture, 1, 0)
+                .shader("portal")
+                .build();
+            let mut instance = Instance::new(transform.position, vec3(6.0, 8.0, 1.0));
+            instance.transform.rotation = transform.rotation;
+            let instances = gfx.instances().from_instances(vec![instance]).build();
+            let surface = gfx.add_renderable(material, surface_mesh, instances);
+            gfx.world(scene)
+                .borrow_mut()
+                .add_entity((surface, PORTAL_SURFACE_LAYER));
+
+            let color = if index == 0 {
+                vec3(0.04, 0.55, 1.0)
+            } else {
+                vec3(1.0, 0.32, 0.04)
+            };
+            let mut landmarks = Vec::new();
+            let mut cube = |position, scale, color| {
+                let mut instance = Instance::new(
+                    // Cube vertices run from 0 to 1; positions here denote centers.
+                    transform.position + transform.rotation.rotate_vector(position - scale * 0.5),
+                    scale,
+                );
+                instance.transform.rotation = transform.rotation;
+                instance.color = color;
+                landmarks.push(instance);
+            };
+            // Colored frame and a floor with depth-spaced landmarks reveal parallax.
+            for x in [-3.2, 3.2] {
+                cube(vec3(x, 0.0, 0.0), vec3(0.4, 8.8, 0.4), color);
+            }
+            for y in [-4.2, 4.2] {
+                cube(vec3(0.0, y, 0.0), vec3(6.0, 0.4, 0.4), color);
+            }
+            cube(
+                vec3(0.0, -4.6, 8.0),
+                vec3(22.0, 0.4, 22.0),
+                vec3(0.16, 0.19, 0.24),
+            );
+            cube(vec3(0.0, 3.0, 23.0), vec3(22.0, 15.0, 0.4), color * 0.3);
+            for x in [-11.0, 11.0] {
+                cube(vec3(x, 3.0, 10.0), vec3(0.4, 15.0, 26.0), color * 0.2);
+            }
+            for i in 0..6 {
+                let z = 3.0 + i as f32 * 2.5;
+                cube(
+                    vec3(-4.5 + (i % 2) as f32 * 9.0, -2.5, z),
+                    vec3(1.0, 3.0 + (i % 2) as f32, 1.0),
+                    color,
+                );
+                cube(
+                    vec3(0.0, -4.35, z),
+                    vec3(16.0, 0.1, 0.12),
+                    vec3(0.6, 0.65, 0.7),
+                );
+            }
+            // Forbidden-side magenta bar: visible locally, clipped through the other portal.
+            cube(
+                vec3(0.0, 1.5, -2.0),
+                vec3(4.0, 0.5, 0.5),
+                vec3(1.0, 0.0, 0.7),
+            );
+            let instances = gfx.instances().from_instances(landmarks).build();
+            let geometry = gfx.add_renderable(world_material, cube_mesh, instances);
+            gfx.world(scene).borrow_mut().add_entity((geometry,));
+            endpoints.push(PortalEndpoint {
+                scene,
+                transform,
+                view,
+                surface,
+            });
+        }
+        let portal_b = endpoints.pop().unwrap();
+        let portal_a = endpoints.pop().unwrap();
+        PortalPlayground {
+            main_view,
+            portal_a,
+            portal_b,
+        }
+    }
+
+    fn update_portal_playground(&mut self, gfx: &mut Graphics) {
+        let Some(playground) = &mut self.portal_playground else {
+            return;
+        };
+        let main = gfx.render_views.get_render_view(playground.main_view);
+        let camera = main.camera;
+        let size = main.render_target.size();
+        for (source, destination) in [
+            (&playground.portal_a, &playground.portal_b),
+            (&playground.portal_b, &playground.portal_a),
+        ] {
+            let mut target = gfx
+                .render_views
+                .get_render_view(source.view)
+                .render_target
+                .clone();
+            if target.resize_texture(gfx, size) {
+                let texture = gfx.get_texture(target.color_texture().unwrap()).clone();
+                let material = gfx.get_renderable(source.surface).material_handle;
+                gfx.set_material_texture(material, &texture, 1, 0);
+            }
+            let derived =
+                camera_through_portal(&camera, &source.transform, &destination.transform, size);
+            let view = gfx.render_views.get_render_view_mut(source.view);
+            view.render_target = target;
+            view.camera = derived;
+            view.clip_plane = Some(portal_exit_plane(&destination.transform, derived.eye));
+            let surface = &mut gfx.get_instance_controller(source.surface).instances_mut()[0];
+            surface.transform.position = source.transform.position;
+            surface.transform.rotation = source.transform.rotation;
+        }
+    }
+
     fn initiate_audio_playground(&mut self, state: &mut State) {
         let keys = [
             "C4", "C#4", "D4", "D#4", "E4", "F4", "F#4", "G4", "G#4", "A4", "A#4", "B4", "C5",
@@ -454,6 +713,8 @@ impl Game for Website {
             "shaders/textured.wgsl",
             "shaders/sprite.wgsl",
             "shaders/sprite_screen.wgsl",
+            "shaders/portal.wgsl",
+            "shaders/portal_world.wgsl",
             "pbr_test/cubemaps/solitude_night_4k.hdr",
             "pbr_test/cubemaps/kloofendal_48d_partly_cloudy_puresky_4k.hdr",
             "pbr_test/cubemaps/mealie_road_4k.hdr",
@@ -625,6 +886,10 @@ impl Game for Website {
                 self.bad_apple.index += 1;
                 self.bad_apple.elapsed -= target;
             }
+        }
+
+        if self.portal_playground.is_some() {
+            self.update_portal_playground(gfx);
         }
     }
 
@@ -863,7 +1128,7 @@ impl Game for Website {
 
         // Initiate the main view. Its camera belongs to the view rather than the scene.
         let main_target = RenderTarget::window(state.size);
-        let mut camera = Camera::new(main_target.clone(), 75.0, 50.0);
+        let mut camera = Camera::new(main_target.size(), 75.0, 50.0);
         camera.eye = Point3 {
             x: -17.16,
             y: 6.1,
@@ -875,12 +1140,7 @@ impl Game for Website {
         camera.update_camera(gfx.dt());
         camera.update_forward();
         let camera_speed = camera.speed;
-        let main_view = gfx.new_render_view(
-            "main",
-            main_scene,
-            main_target.clone(),
-            RenderViewRole::Main,
-        );
+        let main_view = gfx.new_render_view("main", main_scene, main_target, RenderViewRole::Main);
 
         gfx.render_views.get_render_view_mut(main_view).camera = camera;
 
@@ -1006,78 +1266,8 @@ impl Game for Website {
             [33.0, 0.0, 0.0].into(),
         );
 
-        let texture_size = PhysicalSize::new(1920, 1080);
-        let texture_format = gfx.engine.render_context.config.format;
-
-        let color_texture = gfx
-            .texture("texture_test_color")
-            .render_target(texture_size, texture_format)
-            .build();
-        let color_texture_handle = gfx.add_texture(color_texture.clone());
-        let depth_texture = gfx
-            .texture("texture_test_depth")
-            .depth_target(texture_size)
-            .build();
-        let depth_texture = gfx.add_texture(depth_texture);
-        let texture_target = RenderTarget::texture(
-            color_texture_handle,
-            0,
-            Some((depth_texture, 0)),
-            texture_size,
-            texture_format,
-        );
-        let mut camera = Camera::new(texture_target.clone(), 75.0, 50.0);
-        camera.eye = Point3 {
-            x: -17.16,
-            y: 6.1,
-            z: -12.4,
-        };
-        camera.yaw = 30.0;
-        camera.pitch = -1.4;
-        camera.projection = CameraProjection::Perspective;
-        camera.update_camera(gfx.dt());
-        camera.update_forward();
-        let texture_scene = gfx.new_scene("test_scene2", |gfx: &mut Graphics, world, scene| {
-            let solitude = gfx.asset("pbr_test/cubemaps/solitude_night_4k.hdr");
-            let cubemap_texture = gfx.texture("cubemap2").hdri_cubemap(&solitude);
-            let ibl_maps = gfx.texture("ibl").ibl_maps(&cubemap_texture);
-
-            let sphere_mesh = Meshes::Sphere
-                .create()
-                .make_mb(&mut gfx.engine.render_context);
-
-            gfx.add_skybox(&cubemap_texture, world);
-            Website::physics_playground(gfx, camera_speed, &ibl_maps, world, scene);
-        });
-
-        let mesh = Meshes::Sprite
-            .create()
-            .make_mb(&mut gfx.engine.render_context);
-
-        let instance_scale = Vector3::new(128.0, 72.0, 1.0);
-
-        let mut instance = Instance::new([0.0, 0.0, 0.0].into(), instance_scale);
-        instance.uv = [0.0, 0.0, 1.0, 1.0].into();
-        let instance_controller = gfx
-            .instances_typed::<SpriteInstanceLayout>()
-            .from_instances([instance].into())
-            .build();
-
-        let camera_material = gfx
-            .material_instance::<SpriteInstanceLayout>()
-            .texture(&color_texture, 1, 0)
-            .shader("sprite")
-            .build();
-        let renderable = gfx.add_renderable(camera_material, mesh, instance_controller);
-        gfx.add_entity((renderable,));
-
-        let texture_view = gfx.new_render_view(
-            "texture_test",
-            texture_scene,
-            texture_target,
-            RenderViewRole::Auxiliary,
-        );
-        gfx.render_views.get_render_view_mut(texture_view).camera = camera;
+        // Toggle the entire portal experiment with this one call.
+        self.portal_playground = Some(Self::portal_playground(gfx, main_scene, main_view));
 
         let _screen_sprite = Sprite::new_screen_space(
             gfx,
@@ -1127,7 +1317,7 @@ impl Game for Website {
         });
 
         let main_target = RenderTarget::window(state.size);
-        let mut camera = Camera::new(main_target.clone(), 75.0, 50.0);
+        let mut camera = Camera::new(main_target.size(), 75.0, 50.0);
         camera.eye = Point3 {
             x: -17.16,
             y: 6.1,
@@ -1142,7 +1332,7 @@ impl Game for Website {
         let main_view = gfx.new_render_view(
             "alternate",
             scene_handle,
-            main_target.clone(),
+            main_target,
             RenderViewRole::Auxiliary,
         );
 
@@ -1337,41 +1527,67 @@ fn ball_setup(gfx: &mut Graphics, world: &mut World, cubemap_texture: &Texture) 
     world.add_entity((sphere_entity2, Collider::Sphere { radius: 1.0 }));
 }
 
-fn switch_cubemap_1(_game: &mut Website, context: &mut KeyboardEventContext) {
+fn switch_cubemap_1(game: &mut Website, context: &mut KeyboardEventContext) {
+    if let Some(playground) = &game.portal_playground {
+        let endpoint = &playground.portal_a;
+        let normal = endpoint.transform.rotation.rotate_vector(Vector3::unit_z());
+        let camera = &mut context
+            .gfx
+            .render_views
+            .get_render_view_mut(playground.main_view)
+            .camera;
+        camera.eye = Point3::from_vec(endpoint.transform.position + normal * 12.0);
+        camera.forward = -normal;
+        camera.yaw = camera.forward.z.atan2(camera.forward.x).to_degrees();
+        camera.pitch = camera.forward.y.asin().to_degrees();
+        camera.up = Vector3::unit_y();
+        camera.target = camera.eye + camera.forward;
+        camera.camera_mode = CameraMode::Free;
+    }
     let scene = context.gfx.scenes.scenes_lookup["test_scene1"];
-    context
-        .gfx
-        .render_views
-        .get_render_view_from_name_mut("main")
-        .scene = scene;
-    context.gfx.set_active_gameplay_scene(scene);
+    select_main_scene(context, scene);
 }
 
-fn switch_cubemap_2(_game: &mut Website, context: &mut KeyboardEventContext) {
-    let scene = context.gfx.scenes.scenes_lookup["test_scene2"];
+fn switch_cubemap_2(game: &mut Website, context: &mut KeyboardEventContext) {
+    let Some(playground) = &game.portal_playground else {
+        return;
+    };
+    let endpoint = &playground.portal_b;
+    let scene = endpoint.scene;
+    let normal = endpoint.transform.rotation.rotate_vector(Vector3::unit_z());
+    let camera = &mut context
+        .gfx
+        .render_views
+        .get_render_view_mut(playground.main_view)
+        .camera;
+    camera.eye = Point3::from_vec(endpoint.transform.position + normal * 12.0);
+    camera.forward = -normal;
+    camera.up = Vector3::unit_y();
+    camera.yaw = camera.forward.z.atan2(camera.forward.x).to_degrees();
+    camera.pitch = camera.forward.y.asin().to_degrees();
+    camera.target = camera.eye + camera.forward;
+    camera.camera_mode = CameraMode::Free;
+    select_main_scene(context, scene);
+}
+
+fn select_main_scene(context: &mut KeyboardEventContext, scene: SceneHandle) {
     context
         .gfx
         .render_views
-        .get_render_view_from_name_mut("main")
-        .scene = scene;
+        .get_render_view_from_name_mut("alternate")
+        .role = RenderViewRole::Auxiliary;
+    let main = context
+        .gfx
+        .render_views
+        .get_render_view_from_name_mut("main");
+    main.role = RenderViewRole::Main;
+    main.scene = scene;
     context.gfx.set_active_gameplay_scene(scene);
 }
 
 fn switch_cubemap_3(_game: &mut Website, context: &mut KeyboardEventContext) {
     let scene = context.gfx.scenes.scenes_lookup["test_scene3"];
-    let old_view = context
-        .gfx
-        .render_views
-        .get_render_view_from_name_mut("alternate");
-
-    old_view.role = RenderViewRole::Auxiliary;
-    let new_view = context
-        .gfx
-        .render_views
-        .get_render_view_from_name_mut("main");
-
-    new_view.role = RenderViewRole::Main;
-    new_view.scene = scene;
+    select_main_scene(context, scene);
 }
 fn switch_cubemap_4(_game: &mut Website, context: &mut KeyboardEventContext) {
     let old_view = context

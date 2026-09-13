@@ -34,6 +34,10 @@ web-sys = { version = "0.3", features = [
 [profile.dev]
 debug = true
 opt-level = 0
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+pollster = "1.0.1"
+image = { version = "0.25", default-features = false, features = ["png"] }
 # [profile.dev.package."sparmos-engine"]
 # debug = true
 # opt-level = 0
